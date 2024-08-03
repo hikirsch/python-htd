@@ -3,8 +3,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from htd import HtdClient
-from htd.constants import HtdConstants
+from htd_client import HtdClient
+from htd_client.constants import HtdConstants
 
 # Mock constants
 MOCK_IP_ADDRESS = "10.0.0.1"
@@ -49,8 +49,8 @@ def test_constructor(htd_instance):
         ("balance_right", HtdConstants.BALANCE_RIGHT_COMMAND),
     ]
 )
-@patch('htd.utils.validate_zone')
-@patch('htd.HtdClient._send_and_parse', return_value="return_value")
+@patch('htd_client.utils.validate_zone')
+@patch('htd_client.HtdClient._send_and_parse', return_value="return_value")
 def test_zone_set_commands(mock__send_and_parse, mock_validate_zone, method, code, htd_instance):
     zone_number = 100
     response = getattr(htd_instance, method)(zone_number)
@@ -59,9 +59,9 @@ def test_zone_set_commands(mock__send_and_parse, mock_validate_zone, method, cod
     assert response == "return_value"
 
 
-@patch('htd.utils.validate_zone')
-@patch('htd.utils.validate_source')
-@patch('htd.HtdClient._send_and_parse', return_value="return_value")
+@patch('htd_client.utils.validate_zone')
+@patch('htd_client.utils.validate_source')
+@patch('htd_client.HtdClient._send_and_parse', return_value="return_value")
 def test_zone_set_source_command(mock__send_and_parse, mock_validate_source, mock_validate_zone, htd_instance):
     zone_number = 20
     source_number = 30
@@ -85,22 +85,22 @@ def test_zone_set_source_command(mock__send_and_parse, mock_validate_source, moc
         ("power_on_all_zones", HtdConstants.POWER_ON_ALL_ZONES_COMMAND),
     ]
 )
-@patch('htd.HtdClient._send_and_parse_all')
+@patch('htd_client.HtdClient._send_and_parse_all')
 def test_all_zones_set_commands(mock__send_and_parse_all, method, code, htd_instance):
     callable = getattr(htd_instance, method)
     callable()
     mock__send_and_parse_all.assert_called_with(1, HtdConstants.SET_COMMAND_CODE, code)
 
 
-@patch('htd.HtdClient._send_and_parse_all', return_value="return_value")
+@patch('htd_client.HtdClient._send_and_parse_all', return_value="return_value")
 def test_all_zones_query_command(mock__send_and_parse_all, htd_instance):
     response = htd_instance.query_all_zones()
     mock__send_and_parse_all.assert_called_with(0, HtdConstants.QUERY_COMMAND_CODE, 0)
     assert response == "return_value"
 
 
-@patch('htd.utils.get_friendly_name')
-@patch('htd.HtdClient._send')
+@patch('htd_client.utils.get_friendly_name')
+@patch('htd_client.HtdClient._send')
 def test_model_info_query(mock__send, mock_get_friendly_name, htd_instance):
     expected = "return_value"
     expected_friendly_name = "friendly_name"
@@ -112,7 +112,7 @@ def test_model_info_query(mock__send, mock_get_friendly_name, htd_instance):
     assert model_info == expected
 
 
-@patch('htd.HtdClient._send_and_parse', return_value="return_value")
+@patch('htd_client.HtdClient._send_and_parse', return_value="return_value")
 def test_query_zone(mock__send_and_parse, htd_instance):
     zone_number = 1
     response = htd_instance.query_zone(zone_number)
@@ -120,7 +120,7 @@ def test_query_zone(mock__send_and_parse, htd_instance):
     assert response == "return_value"
 
 
-@patch('htd.HtdClient._send_and_parse', return_value="return_value")
+@patch('htd_client.HtdClient._send_and_parse', return_value="return_value")
 def test_send_and_parse_all(mock__send_and_parse, htd_instance):
     arg1 = 1
     arg2 = bytearray([0])
@@ -132,7 +132,7 @@ def test_send_and_parse_all(mock__send_and_parse, htd_instance):
     assert response == "return_value"
 
 
-@patch('htd.utils.get_command')
+@patch('htd_client.utils.get_command')
 @patch('socket.create_connection')
 def test_send(mock_create_connection, mock_get_command, htd_instance):
     mock_socket_instance = MagicMock()
@@ -157,8 +157,8 @@ def test_send(mock_create_connection, mock_get_command, htd_instance):
     assert response == "return_value"
 
 
-@patch('htd.HtdClient._send')
-@patch('htd.utils.parse_zone')
+@patch('htd_client.HtdClient._send')
+@patch('htd_client.utils.parse_zone')
 def test_send_and_parse_single(mock_parse_zone, mock__send, htd_instance):
     mock_response = "raw_return_value"
     mock_parsed_response = "return_value"
@@ -172,8 +172,8 @@ def test_send_and_parse_single(mock_parse_zone, mock__send, htd_instance):
     assert response == mock_parsed_response
 
 
-@patch('htd.HtdClient._send')
-@patch('htd.utils.parse_all_zones')
+@patch('htd_client.HtdClient._send')
+@patch('htd_client.utils.parse_all_zones')
 def test_send_and_parse_multiple(mock_parse_all_zones, mock__send, htd_instance):
     mock_response = "raw_return_value"
     mock_parsed_response = "return_value"
@@ -187,8 +187,8 @@ def test_send_and_parse_multiple(mock_parse_all_zones, mock__send, htd_instance)
     assert response == mock_parsed_response
 
 
-@patch('htd.HtdClient._send')
-@patch('htd.utils.parse_zone')
+@patch('htd_client.HtdClient._send')
+@patch('htd_client.utils.parse_zone')
 def test_send_and_parse_single_invalid_no_retry(mock_parse_zone, mock__send, htd_instance):
     mock_response = "raw_return_value"
     mock_parsed_response = None
@@ -204,8 +204,8 @@ def test_send_and_parse_single_invalid_no_retry(mock_parse_zone, mock__send, htd
 
 
 @patch('time.sleep')
-@patch('htd.HtdClient._send')
-@patch('htd.utils.parse_zone')
+@patch('htd_client.HtdClient._send')
+@patch('htd_client.utils.parse_zone')
 def test_send_and_parse_single_invalid_with_retry(mock_parse_zone, mock__send, mock_sleep, htd_instance):
     mock_response = "raw_return_value"
     mock_parsed_response = None
@@ -223,7 +223,7 @@ def test_send_and_parse_single_invalid_with_retry(mock_parse_zone, mock__send, m
         assert mock_sleep.call_args_list[i].args[0] == (i + 1) * MOCK_COMMAND_DELAY / 1_000
 
 
-@patch('htd.HtdClient.query_zone')
+@patch('htd_client.HtdClient.query_zone')
 def test_set_volume_query_zone_volume_ok(mock_query_zone, htd_instance):
     mock_zone = 10
     mock_volume = 30
@@ -236,8 +236,8 @@ def test_set_volume_query_zone_volume_ok(mock_query_zone, htd_instance):
     assert response == mock_zone_info
 
 
-@patch('htd.HtdClient.query_zone')
-@patch('htd.HtdClient._send_and_parse')
+@patch('htd_client.HtdClient.query_zone')
+@patch('htd_client.HtdClient._send_and_parse')
 def test_set_volume_query_zone_volume_down(mock_send_and_parse, mock_query_zone, htd_instance):
     mock_zone = 10
     mock_volume = 30
@@ -301,7 +301,7 @@ def test_set_volume_query_zone_volume_down(mock_send_and_parse, mock_query_zone,
     # assert mock_query_zone.call_count == 1
     # assert response == mock_zone_info
 
-# @patch('htd.socket.create_connection')
+# @patch('htd_client.socket.create_connection')
 # def _test_my_client(mock_create_connection, htd_instance):
 #     # Create a mock socket instance
 #     mock_socket_instance = MagicMock()
