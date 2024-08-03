@@ -1,6 +1,6 @@
 [tool.poetry]
-name = "htd"
-version = "1.0.0.dev1"
+name = "htd-client"
+version = "0.0.2"
 description = "A client supporting Home Theater Direct's gateway device."
 authors = [
     "Adam Kirschner <accounts@adamskirschner.com>"
@@ -8,13 +8,13 @@ authors = [
 repository = "https://github.com/hikirsch/python-htd"
 readme = "README.md"
 license = "MIT"
+packages = [{include = "htd_client"}]
 
 [tool.poetry.urls]
 "Issues" = "https://github.com/hikirsch/python-htd/issues"
 
 [tool.poetry.dependencies]
 python = "^3.10"
-pytest = "^8.3.2"
 
 [build-system]
 requires = ["poetry-core"]
@@ -23,6 +23,10 @@ build-backend = "poetry.core.masonry.api"
 [tool.poetry.dev-dependencies]
 pytest = "^8.3.2"
 coverage = "7.6.0"
+Sphinx = "7.4.7"
+sphinx-rtd-theme = "2.0.0"
+sphinxcontrib-napoleon = "0.7"
+
 
 [tool.pytest.ini_options]
 testpaths = [

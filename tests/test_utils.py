@@ -3,7 +3,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from htd import HtdConstants, ZoneDetail
+from htd_client import HtdConstants, ZoneDetail
 
 
 class StateTogglesDict(TypedDict):
@@ -56,7 +56,7 @@ def create_mock_state_toggles(state_toggles: StateTogglesDict):
     return int(mock_state, 2)
 
 
-@patch('htd.utils.calculate_checksum')
+@patch('htd_client.utils.calculate_checksum')
 def test_get_command(mock_calculate_checksum: Mock):
     mock_checksum = 100
     zone_number = 5
@@ -65,7 +65,7 @@ def test_get_command(mock_calculate_checksum: Mock):
 
     mock_calculate_checksum.return_value = mock_checksum
 
-    from htd.utils import get_command
+    from htd_client.utils import get_command
     instruction = get_command(zone_number, command, data_code)
 
     assert instruction[0] == HtdConstants.HEADER_BYTE
@@ -77,13 +77,13 @@ def test_get_command(mock_calculate_checksum: Mock):
 
 
 def test_calculate_checksum():
-    from htd.utils import calculate_checksum
+    from htd_client.utils import calculate_checksum
     assert 10 == calculate_checksum([1, 2, 3, 4])
     assert 0 == calculate_checksum([1, 2, 3, 4, -10])
 
 
 def test_get_friendly_name():
-    from htd.utils import get_friendly_name
+    from htd_client.utils import get_friendly_name
     assert get_friendly_name(HtdConstants.MCA66_MODEL_NAME) == HtdConstants.MCA66_FRIENDLY_MODEL_NAME
     assert get_friendly_name("foo") == f"Unknown (foo)"
 
@@ -99,7 +99,7 @@ def test_get_friendly_name():
     ]
 )
 def test_convert_volume(expected_htd, expected_percent):
-    from htd.utils import convert_volume
+    from htd_client.utils import convert_volume
 
     raw = mock_convert_volume(expected_htd)
     (actual_percent, actual_htd) = convert_volume(raw)
@@ -129,7 +129,7 @@ def test_convert_volume(expected_htd, expected_percent):
     ]
 )
 def test_to_binary_string(number, binary):
-    from htd.utils import to_binary_string
+    from htd_client.utils import to_binary_string
     actual = to_binary_string(number)
 
     assert actual == binary
@@ -145,7 +145,7 @@ def test_to_binary_string(number, binary):
     ]
 )
 def test_is_bit_on(actual, string, index):
-    from htd.utils import is_bit_on
+    from htd_client.utils import is_bit_on
     assert actual == is_bit_on(string, index)
 
 
@@ -164,7 +164,7 @@ def test_is_bit_on(actual, string, index):
     ]
 )
 def test_validate_zone_source(is_valid, number):
-    from htd.utils import validate_source, validate_zone
+    from htd_client.utils import validate_source, validate_zone
     if is_valid:
         validate_source(number)
         validate_zone(number)
@@ -182,9 +182,9 @@ def custom_side_effect(x):
     return result
 
 
-@patch('htd.utils.parse_zone', side_effect=custom_side_effect)
+@patch('htd_client.utils.parse_zone', side_effect=custom_side_effect)
 def test_parse_all_zones(mock_parse_zone):
-    from htd.utils import parse_all_zones
+    from htd_client.utils import parse_all_zones
 
     full_message = []
     chunks = []
@@ -210,7 +210,7 @@ def test_parse_all_zones(mock_parse_zone):
 
 
 def test_test_parse_zone():
-    from htd.utils import parse_zone, convert_volume
+    from htd_client.utils import parse_zone, convert_volume
 
     mock_zone = 1
     mock_power = True
@@ -264,7 +264,7 @@ def test_test_parse_zone():
     ]
 )
 def test_invalid_parse_zone(zone_data):
-    from htd.utils import parse_zone
+    from htd_client.utils import parse_zone
     result = parse_zone(bytearray(zone_data))
 
     assert result is None

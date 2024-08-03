@@ -1,10 +1,18 @@
-from htd.constants import HtdConstants
-from htd.models import ZoneDetail
+from htd_client.constants import HtdConstants
+from htd_client.models import ZoneDetail
 
-
-# the command sequence we use to send to the device, the header and reserved
-# bytes are always first, the zone is third, followed by the command and code.
 def get_command(zone: int, command: bytes, data_code: int) -> bytes:
+    """
+    The command sequence we use to send to the device, the header and reserved bytes are always first, the zone is third, followed by the command and code.
+
+    Args:
+        zone (int): the zone this command is for
+        command (bytes): the command itself
+        data_code (int): a value associated to the command, can be a source value, or an action to perform for set.
+
+    Returns:
+        bytes: a bytes sequence representing the instruction for the action requested
+    """
     cmd = [
         HtdConstants.HEADER_BYTE,
         HtdConstants.RESERVED_BYTE,
@@ -18,13 +26,16 @@ def get_command(zone: int, command: bytes, data_code: int) -> bytes:
     return bytes(cmd)
 
 
-# convert the volume into a usable value. the device will transmit a number
-# between 196 - 255. if it's at max volume, the raw volume will come as 0.
-# this is probably because the gateway only transmits 8 bits per byte.
-# 255 is 0b11111111. since there's no volume = 0 (use mute I guess), if the
-# volume hits 0, it's because it's at max volume, so we make it 256.
-# credit for this goes to lounsbrough
 def convert_volume(raw_volume: int) -> (int, int):
+    """
+    Convert the volume into a usable value. the device will transmit a number between 196 - 255. if it's at max volume, the raw volume will come as 0. this is probably because the gateway only transmits 8 bits per byte. 255 is 0b11111111. since there's no volume = 0 (use mute I guess), if the volume hits 0, it's because it's at max volume, so we make it 256. credit for this goes to lounsbrough
+
+    Args:
+        raw_volume (int): the raw volume amount, a number usually ranges from 196 to 255
+
+    Returns:
+        (int, int): A tuple where the first number is a percentage, and the second is the raw volume from 0 to 60
+    """
     if raw_volume == 0:
         return 100, HtdConstants.MAX_HTD_VOLUME
 
@@ -34,36 +45,74 @@ def convert_volume(raw_volume: int) -> (int, int):
     return fixed, htd_volume
 
 
-# the checksum is the last digit on the entire command,
-# it's the sum of all the bytes the other bytes.
-def calculate_checksum(message) -> int:
+def calculate_checksum(message: [int]) -> int:
+    """
+    A helper method to calculate the checksum bit, it is the last digit on the entire command. The value is the sum of all the bytes in the message.
+
+    Args:
+        message (int): an array of ints, to calculate a checksum for
+
+    Returns:
+        int: the sum of the message ints
+    """
     cs = 0
     for b in message:
         cs += b
     return cs
 
-
-# helper method to check the state toggle index is on.
 def is_bit_on(toggles: str, index: int) -> bool:
+    """
+    A helper method to check the state toggle index is on.
+
+    Args:
+        toggles (str): the binary string to check if enabled
+        index (index): the position to check if on
+
+    Returns:
+        bool: if the bit is on
+    """
     return toggles[index] == "1"
 
 
-# helper method to validate the source is not outside the range
 def validate_source(source: int):
+    """
+    A helper method to validate the source is not outside the range. If it's invalid, an Exception is raised, otherwise nothing will happen.
+
+    Args:
+        source (int): the source number to validate
+
+    Raises:
+        Exception: source X is invalid
+    """
     if source not in range(1, HtdConstants.MAX_HTD_SOURCES + 1):
         raise Exception("source %s is invalid" % source)
 
 
-# helper method to validate the zone is not outside the range
 def validate_zone(zone: int):
+    """
+    A helper method to validate the zone is not outside the range. If it's invalid, an Exception is raised, otherwise nothing will happen.
+
+    Args:
+        zone (int): the zone to validate
+
+    Raises:
+        Exception - zone X is invalid
+    """
     if zone not in range(1, HtdConstants.MAX_HTD_ZONES + 1):
         raise Exception("zone %s is invalid" % zone)
 
 
-# this will take a single message chunk of 14 bytes and parse this into
-# a usable ZoneDetail model to read the state.
-# all credit for this new parser goes to lounsbrough
+# credit for this new parser goes to lounsbrough
 def parse_zone(zone_data: bytes) -> ZoneDetail | None:
+    """
+    This will take a single message chunk of 14 bytes and parse this into a usable `ZoneDetail` model to read the state.
+
+    Parameters:
+        zone_data (bytes): an array of bytes representing a zone
+
+    Returns:
+        ZoneDetail - a parsed instance of zone_data normalized or None if invalid
+    """
     if (
         zone_data[HtdConstants.HEADER_BYTE_ZONE_DATA_INDEX] != HtdConstants.HEADER_BYTE or
         zone_data[HtdConstants.RESERVED_BYTE_ZONE_DATA_INDEX] != HtdConstants.RESERVED_BYTE
@@ -109,12 +158,16 @@ def parse_zone(zone_data: bytes) -> ZoneDetail | None:
     return zone
 
 
-# the handler method to take the entire response from the controller and parse
-# each zone. it was believed that the controller can respond with multiple
-# zones. in my testing this has never been the case. the device will always
-# send 28 bytes (2 chunks), the first chunk is always invalidated by some
-# check, the second is zone info we requested.
 def parse_all_zones(data: bytes) -> dict[int, ZoneDetail]:
+    """
+    The handler method to take the entire response from the controller and parses each zone.
+
+    Args:
+        data (bytes): the full response from the device, represents all the zones to be parsed
+
+    Returns:
+        dict[int, ZoneDetail]: a dict where the key represents the zone number, and the value are the details of the zone
+    """
     position = 0
     zones = {}
 
@@ -136,9 +189,17 @@ def parse_all_zones(data: bytes) -> dict[int, ZoneDetail]:
     return zones
 
 
-# helper method to convert the integer number for the state values into a
-# binary string, so we can check the state of each individual toggle.
 def to_binary_string(raw_value: int) -> str:
+    """
+    A helper method to convert the integer number for the state values into a binary string, so we can check the state of each individual toggle.
+
+    Parameters:
+        raw_value (int): a number to convert to a binary string
+
+    Returns:
+        str: a binary string of the int
+    """
+
     # the state toggles value needs to be interpreted in binary,
     # each bit represents a new flag.
     state_toggles = bin(raw_value)
@@ -153,10 +214,16 @@ def to_binary_string(raw_value: int) -> str:
 
     return state_toggles
 
+def get_friendly_name(model: str):
+    """
+    This will return a friendlier name for the model gateway based on the name from the device.
 
-# this will return a friendlier name for the model gateway based on the name
-# from the device.
-def get_friendly_name(model):
+    Args:
+        model (str):
+
+    Returns:
+        str: a friendlier name of the model
+    """
     match model:
         case HtdConstants.MCA66_MODEL_NAME:
             return HtdConstants.MCA66_FRIENDLY_MODEL_NAME

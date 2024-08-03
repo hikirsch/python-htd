@@ -1,10 +1,18 @@
+MAX_BYTES_TO_RECEIVE = 2 ** 10  # receive 1024 bytes
+ONE_SECOND = 1_000
+
 class HtdConstants:
+    """
+    A constants class representing values used.
+    """
+
     MCA66_MODEL_NAME = 'Wangine_MCA66'
     MCA66_FRIENDLY_MODEL_NAME = 'MCA66'
 
-    # the first and second bits are always this. whether we send or receive
     HEADER_BYTE = 0x02
+
     RESERVED_BYTE = 0x00
+
     VERIFICATION_BYTE = 0x05
 
     # in order to not flood the device with commands, we have a delay

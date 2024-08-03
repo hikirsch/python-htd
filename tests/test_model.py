@@ -1,4 +1,4 @@
-from htd import ZoneDetail
+from htd_client import ZoneDetail
 
 
 def test_model():
