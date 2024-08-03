@@ -158,6 +158,15 @@ def parse_zone(zone_data: bytes) -> ZoneDetail | None:
     return zone
 
 
+def parse_single_zone(data: bytes, zone: int) -> ZoneDetail | None:
+    all_zones = parse_all_zones(data)
+
+    if zone in all_zones:
+        return all_zones[zone]
+
+    return None
+
+
 def parse_all_zones(data: bytes) -> dict[int, ZoneDetail]:
     """
     The handler method to take the entire response from the controller and parses each zone.

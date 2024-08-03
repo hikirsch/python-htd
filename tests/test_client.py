@@ -158,12 +158,12 @@ def test_send(mock_create_connection, mock_get_command, htd_instance):
 
 
 @patch('htd_client.HtdClient._send')
-@patch('htd_client.utils.parse_zone')
-def test_send_and_parse_single(mock_parse_zone, mock__send, htd_instance):
+@patch('htd_client.utils.parse_single_zone')
+def test_send_and_parse_single(mock_parse_single_zone, mock__send, htd_instance):
     mock_response = "raw_return_value"
     mock_parsed_response = "return_value"
     mock__send.return_value = mock_response
-    mock_parse_zone.return_value = mock_parsed_response
+    mock_parse_single_zone.return_value = mock_parsed_response
     mock_zone = 10
     mock_command = bytearray([0x01, 0x02, 0x03, 0x04, 0x05])
     mock_data_code = 5
@@ -188,12 +188,12 @@ def test_send_and_parse_multiple(mock_parse_all_zones, mock__send, htd_instance)
 
 
 @patch('htd_client.HtdClient._send')
-@patch('htd_client.utils.parse_zone')
-def test_send_and_parse_single_invalid_no_retry(mock_parse_zone, mock__send, htd_instance):
+@patch('htd_client.utils.parse_single_zone')
+def test_send_and_parse_single_invalid_no_retry(mock_parse_single_zone, mock__send, htd_instance):
     mock_response = "raw_return_value"
     mock_parsed_response = None
     mock__send.return_value = mock_response
-    mock_parse_zone.return_value = mock_parsed_response
+    mock_parse_single_zone.return_value = mock_parsed_response
     mock_zone = 10
     mock_command = bytearray([0x01, 0x02, 0x03, 0x04, 0x05])
     mock_data_code = 5
@@ -205,12 +205,12 @@ def test_send_and_parse_single_invalid_no_retry(mock_parse_zone, mock__send, htd
 
 @patch('time.sleep')
 @patch('htd_client.HtdClient._send')
-@patch('htd_client.utils.parse_zone')
-def test_send_and_parse_single_invalid_with_retry(mock_parse_zone, mock__send, mock_sleep, htd_instance):
+@patch('htd_client.utils.parse_single_zone')
+def test_send_and_parse_single_invalid_with_retry(mock_parse_single_zone, mock__send, mock_sleep, htd_instance):
     mock_response = "raw_return_value"
     mock_parsed_response = None
     mock__send.return_value = mock_response
-    mock_parse_zone.return_value = mock_parsed_response
+    mock_parse_single_zone.return_value = mock_parsed_response
     mock_zone = 10
     mock_command = bytearray([0x01, 0x02, 0x03, 0x04, 0x05])
     mock_data_code = 5

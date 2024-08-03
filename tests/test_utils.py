@@ -208,6 +208,25 @@ def test_parse_all_zones(mock_parse_zone):
 
     assert 6 == len(response.keys())
 
+@patch('htd_client.utils.parse_all_zones')
+def test_parse_single_zone(mock_parse_all_zones):
+    fake_data = bytearray([0, 1, 2, 3, 4, 5])
+    fake_value = {"some": "fake"}
+    fake_dict = {
+        64: fake_value
+    }
+    mock_parse_all_zones.return_value = fake_dict
+    from htd_client.utils import parse_single_zone
+    response = parse_single_zone(fake_data, 64)
+
+    mock_parse_all_zones.assert_called_with(fake_data)
+    assert response == fake_value
+
+    response = parse_single_zone(fake_data, 1)
+
+    assert response is None
+
+
 
 def test_test_parse_zone():
     from htd_client.utils import parse_zone, convert_volume
