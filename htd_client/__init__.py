@@ -465,13 +465,10 @@ class HtdClient:
         """
         response = self._send(zone, command, data_code)
 
-        # parser = htd_client.utils.parse_all_zones if is_multiple else htd_client.utils.parse_zone
         if is_multiple:
-            parser = htd_client.utils.parse_all_zones
+            parsed = htd_client.utils.parse_all_zones(response)
         else:
-            parser = htd_client.utils.parse_zone
-
-        parsed = parser(response)
+            parsed = htd_client.utils.parse_single_zone(response, zone)
 
         if parsed is None and enable_retry and attempt < self._retry_attempts:
             _LOGGER.warning(
