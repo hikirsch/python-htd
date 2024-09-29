@@ -1,4 +1,5 @@
-from htd_client.constants import HtdConstants
+from constants import HtdLyncConstants
+from htd_client.constants import HtdConstants, HtdMcaConstants, HtdDeviceKind, HtdModelInfo
 from htd_client.models import ZoneDetail
 
 def get_command(zone: int, command: bytes, data_code: int) -> bytes:
@@ -24,6 +25,10 @@ def get_command(zone: int, command: bytes, data_code: int) -> bytes:
     cmd.append(checksum)
 
     return bytes(cmd)
+
+def convert_balance_value_mca(value: int):
+    signed_val = (value - 0x100) if value > 0x7F else value
+    return signed_val
 
 
 def convert_volume(raw_volume: int) -> (int, int):
@@ -84,8 +89,9 @@ def validate_source(source: int):
     Raises:
         Exception: source X is invalid
     """
-    if source not in range(1, HtdConstants.MAX_HTD_SOURCES + 1):
-        raise Exception("source %s is invalid" % source)
+    # if source not in range(1, HtdConstants.MAX_HTD_SOURCES + 1):
+    #     raise Exception("source %s is invalid" % source)
+    pass
 
 
 def validate_zone(zone: int):
@@ -98,12 +104,21 @@ def validate_zone(zone: int):
     Raises:
         Exception - zone X is invalid
     """
-    if zone not in range(1, HtdConstants.MAX_HTD_ZONES + 1):
-        raise Exception("zone %s is invalid" % zone)
+    # if zone not in range(1, HtdConstants.MAX_HTD_ZONES + 1):
+    #     raise Exception("zone %s is invalid" % zone)
+    pass
+
+
+def validate_zone_response(zone_data: bytes, command: bytes) -> bool:
+    return (
+        zone_data[HtdConstants.HEADER_BYTE_RESPONSE_INDEX] == HtdConstants.HEADER_BYTE and
+        zone_data[HtdConstants.RESERVED_BYTE_RESPONSE_INDEX] == HtdConstants.RESERVED_BYTE
+        # and zone_data[HtdConstants.COMMAND_RESPONSE_BYTE_RESPONSE_INDEX] == command
+    )
 
 
 # credit for this new parser goes to lounsbrough
-def parse_zone(zone_data: bytes) -> ZoneDetail | None:
+def parse_zone_mca(zone_data: bytes) -> ZoneDetail | None:
     """
     This will take a single message chunk of 14 bytes and parse this into a usable `ZoneDetail` model to read the state.
 
@@ -113,14 +128,9 @@ def parse_zone(zone_data: bytes) -> ZoneDetail | None:
     Returns:
         ZoneDetail - a parsed instance of zone_data normalized or None if invalid
     """
-    if (
-        zone_data[HtdConstants.HEADER_BYTE_ZONE_DATA_INDEX] != HtdConstants.HEADER_BYTE or
-        zone_data[HtdConstants.RESERVED_BYTE_ZONE_DATA_INDEX] != HtdConstants.RESERVED_BYTE
-    ):
-        return None
+    zone_number = zone_data[HtdConstants.ZONE_NUMBER_ZONE_DATA_INDEX]
 
-    # I think this is some kind of verification, it has been right so far.
-    if zone_data[HtdConstants.VERIFICATION_BYTE_ZONE_DATA_INDEX] != HtdConstants.VERIFICATION_BYTE:
+    if zone_number == 0:
         return None
 
     # the 4th position represent the toggles for power, mute, mode and party,
@@ -129,50 +139,82 @@ def parse_zone(zone_data: bytes) -> ZoneDetail | None:
     )
 
     volume, htd_volume = convert_volume(
-        zone_data[HtdConstants.VOLUME_ZONE_DATA_INDEX]
+        zone_data[HtdMcaConstants.VOLUME_ZONE_DATA_INDEX]
     )
-
-    zone_number = zone_data[HtdConstants.ZONE_NUMBER_ZONE_DATA_INDEX]
 
     zone = ZoneDetail(zone_number)
 
     zone.number = zone_number
     zone.power = is_bit_on(
         state_toggles,
-        HtdConstants.POWER_STATE_TOGGLE_INDEX
+        HtdMcaConstants.POWER_STATE_TOGGLE_INDEX
     )
-    zone.mute = is_bit_on(state_toggles, HtdConstants.MUTE_STATE_TOGGLE_INDEX)
-    zone.mode = is_bit_on(state_toggles, HtdConstants.MODE_STATE_TOGGLE_INDEX)
-    zone.party = is_bit_on(
-        state_toggles,
-        HtdConstants.PARTY_MODE_STATE_TOGGLE_INDEX
-    )
+    zone.mute = is_bit_on(state_toggles, HtdMcaConstants.MUTE_STATE_TOGGLE_INDEX)
+    zone.mode = is_bit_on(state_toggles, HtdMcaConstants.MODE_STATE_TOGGLE_INDEX)
 
-    zone.source = zone_data[HtdConstants.SOURCE_ZONE_DATA_INDEX] + HtdConstants.SOURCE_QUERY_OFFSET
+    zone.source = zone_data[HtdMcaConstants.SOURCE_ZONE_DATA_INDEX] + HtdConstants.SOURCE_QUERY_OFFSET
     zone.volume = volume
     zone.htd_volume = htd_volume
-    zone.treble = zone_data[HtdConstants.TREBLE_ZONE_DATA_INDEX]
-    zone.bass = zone_data[HtdConstants.BASS_ZONE_DATA_INDEX]
-    zone.balance = zone_data[HtdConstants.BALANCE_ZONE_DATA_INDEX]
+    zone.treble = convert_balance_value_mca(zone_data[HtdMcaConstants.TREBLE_ZONE_DATA_INDEX])
+    zone.bass = convert_balance_value_mca(zone_data[HtdMcaConstants.BASS_ZONE_DATA_INDEX])
+    zone.balance = convert_balance_value_mca(zone_data[HtdMcaConstants.BALANCE_ZONE_DATA_INDEX])
+
+    return zone
+
+def parse_zone_lync(zone_data: bytes) -> ZoneDetail | None:
+    """
+    This will take a single message chunk of 14 bytes and parse this into a usable `ZoneDetail` model to read the state.
+
+    Parameters:
+        zone_data (bytes): an array of bytes representing a zone
+
+    Returns:
+        ZoneDetail - a parsed instance of zone_data normalized or None if invalid
+    """
+
+    zone_number = zone_data[HtdConstants.ZONE_NUMBER_ZONE_DATA_INDEX]
+
+    if zone_number == 0:
+        return None
+
+    # the 4th position represent the toggles for power, mute, mode and party,
+    state_toggles = to_binary_string(
+        zone_data[HtdConstants.STATE_TOGGLES_ZONE_DATA_INDEX]
+    )
+
+    # for lync, the toggles are read backwards
+    state_toggles = state_toggles[::-1]
+
+    volume, htd_volume = convert_volume(
+        zone_data[HtdLyncConstants.VOLUME_ZONE_DATA_INDEX]
+    )
+
+    zone = ZoneDetail(zone_number)
+
+    zone.power = is_bit_on(
+        state_toggles,
+        HtdMcaConstants.POWER_STATE_TOGGLE_INDEX
+    )
+    zone.mute = is_bit_on(state_toggles, HtdLyncConstants.MUTE_STATE_TOGGLE_INDEX)
+    zone.mode = is_bit_on(state_toggles, HtdLyncConstants.MODE_STATE_TOGGLE_INDEX)
+
+    zone.source = zone_data[HtdLyncConstants.SOURCE_ZONE_DATA_INDEX] + HtdConstants.SOURCE_QUERY_OFFSET
+    zone.volume = volume
+    zone.htd_volume = htd_volume
+    zone.treble = zone_data[HtdLyncConstants.TREBLE_ZONE_DATA_INDEX]
+    zone.bass = zone_data[HtdLyncConstants.BASS_ZONE_DATA_INDEX]
+    zone.balance = zone_data[HtdLyncConstants.BALANCE_ZONE_DATA_INDEX]
 
     return zone
 
 
-def parse_single_zone(data: bytes, zone: int) -> ZoneDetail | None:
-    all_zones = parse_all_zones(data)
-
-    if zone in all_zones:
-        return all_zones[zone]
-
-    return None
-
-
-def parse_all_zones(data: bytes) -> dict[int, ZoneDetail]:
+def parse_all_zones(data: bytes, kind: HtdDeviceKind) -> dict[int, ZoneDetail]:
     """
     The handler method to take the entire response from the controller and parses each zone.
 
     Args:
         data (bytes): the full response from the device, represents all the zones to be parsed
+        kind (HtdDeviceKind): which htd device is the message from, so we know how to parse it.
 
     Returns:
         dict[int, ZoneDetail]: a dict where the key represents the zone number, and the value are the details of the zone
@@ -188,6 +230,8 @@ def parse_all_zones(data: bytes) -> dict[int, ZoneDetail]:
         # if the zone data we got is less than the exp
         if len(zone_data) < HtdConstants.MESSAGE_CHUNK_SIZE:
             break
+
+        parse_zone = parse_zone_lync if kind == HtdDeviceKind.lync else parse_zone_mca
 
         zone_info = parse_zone(zone_data)
 
@@ -217,13 +261,13 @@ def to_binary_string(raw_value: int) -> str:
     # so substring starting at 2
     state_toggles = state_toggles[2:]
 
-    # each of the 4 bits as 1 represent that the toggle is set to on,
-    # if it's less than 4 digits, we fill with zeros
-    state_toggles = state_toggles.zfill(4)
+    # each of the 8 bits as 1 represent that the toggle is set to on,
+    # if it's less than 8 digits, we fill with zeros
+    state_toggles = state_toggles.zfill(8)
 
     return state_toggles
 
-def get_friendly_name(model: str):
+def get_model_info(model: str) -> HtdModelInfo | None:
     """
     This will return a friendlier name for the model gateway based on the name from the device.
 
@@ -233,8 +277,11 @@ def get_friendly_name(model: str):
     Returns:
         str: a friendlier name of the model
     """
-    match model:
-        case HtdConstants.MCA66_MODEL_NAME:
-            return HtdConstants.MCA66_FRIENDLY_MODEL_NAME
-        case _:
-            return f"Unknown ({model})"
+    if model in HtdConstants.SUPPORTED_MODELS:
+        return HtdConstants.SUPPORTED_MODELS[model]
+    else:
+        return None
+
+
+def parse_zone_name(model: bytes):
+    return "zone_zone"

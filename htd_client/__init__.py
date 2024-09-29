@@ -7,7 +7,7 @@
     # Call its only function
     client = HtdClient("192.168.1.2")
 
-    (model_info, friendly_name) = client.get_model_info()
+    model_info = client.get_model_info()
     zone_info = client.query_zone(1)
     updated_zone_info = client.volume_up(1)
 """
@@ -17,11 +17,21 @@ import logging
 import socket
 import time
 from encodings import utf_8
-from typing import Callable
+from typing import Callable, Dict
 
 import htd_client.utils
-from htd_client.constants import HtdConstants, MAX_BYTES_TO_RECEIVE, ONE_SECOND
-from htd_client.models import ZoneDetail
+from constants import HtdModelInfo, HtdLyncConstants
+from htd_client.constants import (
+    MAX_BYTES_TO_RECEIVE,
+    ONE_SECOND,
+    HtdDeviceKind,
+    HtdConstants,
+    HtdCommonCommands,
+    HtdLyncCommands,
+    HtdMcaCommands, HtdMcaConstants,
+)
+from htd_client.models import ZoneDetail, NotSupportedError
+from utils import validate_zone_response
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -43,13 +53,16 @@ class HtdClient:
     _retry_attempts: int = None
     _socket_timeout_sec: float = None
 
+    _zone_data: Dict[int, ZoneDetail] = None
+
     def __init__(
         self,
         ip_address: str,
-        port: int = HtdConstants.DEFAULT_HTD_MC_PORT,
+        port: int = HtdConstants.DEFAULT_HTD_PORT,
         retry_attempts: int = HtdConstants.DEFAULT_RETRY_ATTEMPTS,
         command_delay: int = HtdConstants.DEFAULT_COMMAND_DELAY,
         socket_timeout: int = HtdConstants.DEFAULT_SOCKET_TIMEOUT,
+        kind: HtdDeviceKind | None = None,
     ):
         self._ip_address = ip_address
         self._port = port
@@ -57,19 +70,24 @@ class HtdClient:
         self._command_delay_sec = command_delay / ONE_SECOND
         self._socket_timeout_sec = socket_timeout / ONE_SECOND
 
-    def get_model_info(self) -> (str, str):
+        self.kind = self._set_kind(kind)
+        self.refresh()
+
+        print(f"detected {self.kind}")
+
+
+    def get_model_info(self) -> HtdModelInfo:
         """
         Get the model information from the gateway.
 
         Returns:
              (str, str): the raw model name from the gateway and the friendly name, in a Tuple.
         """
-        response = self._send(1, HtdConstants.MODEL_QUERY_COMMAND_CODE, 0)
+        response = self._send(1, HtdCommonCommands.MODEL_QUERY_COMMAND_CODE, 0)
         model_info = response.decode(utf_8.getregentry().name)
-        friendly_name = htd_client.utils.get_friendly_name(model_info)
-        return model_info, friendly_name
+        return htd_client.utils.get_model_info(model_info)
 
-    def query_zone(self, zone: int) -> ZoneDetail:
+    def get_zone(self, zone: int):
         """
         Query a zone and return `ZoneDetail`
 
@@ -82,27 +100,48 @@ class HtdClient:
         Raises:
             Exception: zone X is invalid
         """
-        htd_client.utils.validate_zone(zone)
-        return self._send_and_parse(
+        return self._zone_data[zone]
+
+
+    def query_zone_name(self, zone: int) -> str:
+        """
+        Query a zone and return `ZoneDetail`
+
+        Args:
+            zone (int): the zone
+
+        Returns:
+            ZoneDetail: a ZoneDetail instance representing the zone requested
+
+        Raises:
+            Exception: zone X is invalid
+        """
+
+        # htd_client.utils.validate_zone(zone)
+        self._assert_lync()
+
+        response = self._send_and_validate(
             zone,
-            HtdConstants.QUERY_COMMAND_CODE,
+            HtdLyncCommands.QUERY_ZONE_NAME_COMMAND_CODE,
             0
         )
+        
+        return htd_client.utils.parse_zone_name(response)
 
-    def query_all_zones(self) -> dict[int, ZoneDetail]:
+
+    def refresh(self):
         """
         Query all zones and return a dict of `ZoneDetail`
 
         Returns:
             dict[int, ZoneDetail]: a dict where the key represents the zone number, and the value are the details of the zone
         """
-        return self._send_and_parse_all(
-            0,
-            HtdConstants.QUERY_COMMAND_CODE,
-            0
-        )
 
-    def set_source(self, zone: int, source: int) -> ZoneDetail:
+        response = self._send_and_validate(0, self._get_common_command(), 0)
+        self._zone_data = htd_client.utils.parse_all_zones(response, self.kind)
+
+
+    def set_source(self, zone: int, source: int):
         """
         Set the source of a zone.
 
@@ -118,13 +157,19 @@ class HtdClient:
         """
         htd_client.utils.validate_zone(zone)
         htd_client.utils.validate_source(source)
-        return self._send_and_parse(
-            zone,
-            HtdConstants.SET_COMMAND_CODE,
-            HtdConstants.SOURCE_COMMAND_OFFSET + source
+
+        offset = self._pick_kind(
+            HtdMcaConstants.SOURCE_COMMAND_OFFSET,
+            HtdLyncConstants.SOURCE_COMMAND_OFFSET
         )
 
-    def volume_up(self, zone: int) -> ZoneDetail:
+        self._send_and_validate(
+            zone,
+            self._get_common_command(),
+            offset  + source
+        )
+
+    def volume_up(self, zone: int):
         """
         Increase the volume of a zone.
 
@@ -137,14 +182,18 @@ class HtdClient:
         Raises:
             Exception: zone X is invalid
         """
+
+        self._assert_mca()
+
         htd_client.utils.validate_zone(zone)
-        return self._send_and_parse(
+        self._send_and_validate(
             zone,
-            HtdConstants.SET_COMMAND_CODE,
-            HtdConstants.VOLUME_UP_COMMAND
+            self._get_common_command(),
+            HtdMcaCommands.VOLUME_UP_COMMAND
         )
 
-    def volume_down(self, zone: int) -> ZoneDetail:
+
+    def volume_down(self, zone: int):
         """
         Decrease the volume of a zone.
 
@@ -157,14 +206,16 @@ class HtdClient:
         Raises:
             Exception: zone X is invalid
         """
+        self._assert_mca()
+
         htd_client.utils.validate_zone(zone)
-        return self._send_and_parse(
+        return self._send_and_validate(
             zone,
-            HtdConstants.SET_COMMAND_CODE,
-            HtdConstants.VOLUME_DOWN_COMMAND
+            self._get_common_command(),
+            HtdMcaCommands.VOLUME_DOWN_COMMAND
         )
 
-    def toggle_mute(self, zone: int) -> ZoneDetail:
+    def toggle_mute(self, zone: int):
         """
         Toggle the mute state of a zone.
 
@@ -177,14 +228,17 @@ class HtdClient:
         Raises:
             Exception: zone X is invalid
         """
+
+        self._assert_mca()
+
         htd_client.utils.validate_zone(zone)
-        return self._send_and_parse(
+        return self._send_and_validate(
             zone,
-            HtdConstants.SET_COMMAND_CODE,
-            HtdConstants.TOGGLE_MUTE_COMMAND
+            HtdMcaCommands.QUERY_COMMAND_CODE,
+            HtdMcaCommands.TOGGLE_MUTE_COMMAND
         )
 
-    def power_on(self, zone: int) -> ZoneDetail:
+    def power_on(self, zone: int):
         """
         Power on a zone.
 
@@ -197,24 +251,36 @@ class HtdClient:
         Raises:
             Exception: zone X is invalid
         """
+
         htd_client.utils.validate_zone(zone)
-        return self._send_and_parse(
+
+        cmd = self._pick_kind(
+            HtdMcaCommands.POWER_ON_ZONE_COMMAND_CODE,
+            HtdLyncCommands.POWER_ON_ZONE_COMMAND_CODE
+        )
+
+        return self._send_and_validate(
             zone,
-            HtdConstants.SET_COMMAND_CODE,
-            HtdConstants.POWER_ON_ZONE_COMMAND
+            self._get_common_command(),
+            cmd
         )
 
     def power_on_all_zones(self) -> None:
         """
         Power on all zones.
         """
-        self._send_and_parse_all(
-            1,
-            HtdConstants.SET_COMMAND_CODE,
-            HtdConstants.POWER_ON_ALL_ZONES_COMMAND
+        cmd = self._pick_kind(
+            HtdMcaCommands.POWER_ON_ALL_ZONES_COMMAND_CODE,
+            HtdLyncCommands.POWER_ON_ALL_ZONES_COMMAND_CODE
         )
 
-    def power_off(self, zone: int) -> ZoneDetail:
+        self._send_and_validate(
+            1,
+            self._get_common_command(),
+            cmd
+        )
+
+    def power_off(self, zone: int):
         """
         Power off a zone.
 
@@ -227,25 +293,36 @@ class HtdClient:
         Raises:
             Exception: zone X is invalid
         """
+
         htd_client.utils.validate_zone(zone)
 
-        return self._send_and_parse(
+        cmd = self._pick_kind(
+            HtdMcaCommands.POWER_OFF_ZONE_COMMAND_CODE,
+            HtdLyncCommands.POWER_OFF_ZONE_COMMAND_CODE
+        )
+
+        return self._send_and_validate(
             zone,
-            HtdConstants.SET_COMMAND_CODE,
-            HtdConstants.POWER_OFF_ZONE_COMMAND,
+            self._get_common_command(),
+            cmd
         )
 
     def power_off_all_zones(self) -> None:
         """
         Power off all zones.
         """
-        self._send_and_parse_all(
-            1,
-            HtdConstants.SET_COMMAND_CODE,
-            HtdConstants.POWER_OFF_ALL_ZONES_COMMAND
+        cmd = self._pick_kind(
+            HtdMcaCommands.POWER_OFF_ALL_ZONES_COMMAND_CODE,
+            HtdLyncCommands.POWER_OFF_ALL_ZONES_COMMAND_CODE
         )
 
-    def bass_up(self, zone: int) -> ZoneDetail:
+        self._send_and_validate(
+            1,
+            self._get_common_command(),
+            cmd
+        )
+
+    def bass_up(self, zone: int):
         """
         Increase the bass of a zone.
 
@@ -258,14 +335,16 @@ class HtdClient:
         Raises:
             Exception: zone X is invalid
         """
+
+        self._assert_mca()
         htd_client.utils.validate_zone(zone)
-        return self._send_and_parse(
+        self._send_and_validate(
             zone,
-            HtdConstants.SET_COMMAND_CODE,
-            HtdConstants.BASS_UP_COMMAND
+            self._get_common_command(),
+            HtdMcaCommands.BASS_UP_COMMAND
         )
 
-    def bass_down(self, zone: int) -> ZoneDetail:
+    def bass_down(self, zone: int):
         """
         Decrease the bass of a zone.
 
@@ -278,14 +357,15 @@ class HtdClient:
         Raises:
             Exception: zone X is invalid
         """
+        self._assert_mca()
         htd_client.utils.validate_zone(zone)
-        return self._send_and_parse(
+        return self._send_and_validate(
             zone,
-            HtdConstants.SET_COMMAND_CODE,
-            HtdConstants.BASS_DOWN_COMMAND
+            self._get_common_command(),
+            HtdMcaCommands.BASS_DOWN_COMMAND
         )
 
-    def treble_up(self, zone: int) -> ZoneDetail:
+    def treble_up(self, zone: int):
         """
         Increase the treble of a zone.
 
@@ -298,14 +378,15 @@ class HtdClient:
         Raises:
             Exception: zone X is invalid
         """
+        self._assert_mca()
         htd_client.utils.validate_zone(zone)
-        return self._send_and_parse(
+        return self._send_and_validate(
             zone,
-            HtdConstants.SET_COMMAND_CODE,
-            HtdConstants.TREBLE_UP_COMMAND
+            self._get_common_command(),
+            HtdMcaCommands.TREBLE_UP_COMMAND
         )
 
-    def treble_down(self, zone: int) -> ZoneDetail:
+    def treble_down(self, zone: int):
         """
         Decrease the treble of a zone.
 
@@ -318,14 +399,15 @@ class HtdClient:
         Raises:
             Exception: zone X is invalid
         """
+        self._assert_mca()
         htd_client.utils.validate_zone(zone)
-        return self._send_and_parse(
+        return self._send_and_validate(
             zone,
-            HtdConstants.SET_COMMAND_CODE,
-            HtdConstants.TREBLE_DOWN_COMMAND
+            self._get_common_command(),
+            HtdMcaCommands.TREBLE_DOWN_COMMAND
         )
 
-    def balance_left(self, zone: int) -> ZoneDetail:
+    def balance_left(self, zone: int):
         """
         Increase the balance toward the left for a zone.
 
@@ -338,14 +420,15 @@ class HtdClient:
         Raises:
             Exception: zone X is invalid
         """
+        self._assert_mca()
         htd_client.utils.validate_zone(zone)
-        return self._send_and_parse(
+        return self._send_and_validate(
             zone,
-            HtdConstants.SET_COMMAND_CODE,
-            HtdConstants.BALANCE_LEFT_COMMAND
+            self._get_common_command(),
+            HtdMcaCommands.BALANCE_LEFT_COMMAND
         )
 
-    def balance_right(self, zone: int) -> ZoneDetail:
+    def balance_right(self, zone: int):
         """
         Increase the balance toward the right for a zone.
 
@@ -358,11 +441,12 @@ class HtdClient:
         Raises:
             Exception: zone X is invalid
         """
+        self._assert_mca()
         htd_client.utils.validate_zone(zone)
-        return self._send_and_parse(
+        return self._send_and_validate(
             zone,
-            HtdConstants.SET_COMMAND_CODE,
-            HtdConstants.BALANCE_RIGHT_COMMAND
+            self._get_common_command(),
+            HtdMcaCommands.BALANCE_RIGHT_COMMAND
         )
 
     def set_volume(
@@ -371,7 +455,28 @@ class HtdClient:
         volume: float,
         on_increment: Callable[[float, ZoneDetail], int | None] = None,
         zone_info: ZoneDetail | None = None
-    ) -> ZoneDetail:
+    ):
+        if self.kind == HtdDeviceKind.mca:
+            return self._set_volume_mca(zone, volume, on_increment, zone_info)
+        elif self.kind == HtdDeviceKind.lync:
+            return self._set_volume_lync(zone, volume)
+
+
+    def _set_volume_lync(
+        self,
+        zone: int,
+        volume: float
+    ):
+        pass
+
+
+    def _set_volume_mca(
+        self,
+        zone: int,
+        volume: float,
+        on_increment: Callable[[float, ZoneDetail], int | None] = None,
+        zone_info: ZoneDetail | None = None
+    ):
         """
         Set the volume of a zone.
 
@@ -385,7 +490,7 @@ class HtdClient:
             ZoneDetail: a ZoneDetail instance representing the zone requested
         """
         if zone_info is None:
-            zone_info = self.query_zone(zone)
+            zone_info = self._zone_data[zone]
 
         diff = round(volume) - zone_info.volume
 
@@ -396,19 +501,19 @@ class HtdClient:
             return zone_info
 
         if diff < 0:
-            volume_command = HtdConstants.VOLUME_DOWN_COMMAND
+            volume_command = HtdMcaCommands.VOLUME_DOWN_COMMAND
         else:
-            volume_command = HtdConstants.VOLUME_UP_COMMAND
+            volume_command = HtdMcaCommands.VOLUME_UP_COMMAND
 
-        zone_info = self._send_and_parse(
+        response = self._send_and_validate(
             zone,
-            HtdConstants.SET_COMMAND_CODE,
+            self._get_common_command(),
             volume_command,
             enable_retry=False,
         )
 
-        if zone_info is None:
-            zone_info = self.query_zone(zone)
+        zones = htd_client.utils.parse_all_zones(response, HtdDeviceKind.mca)
+        zone_info = zones[zone]
 
         if on_increment is not None:
             # we allow the user to change the volume again and interrupt
@@ -419,36 +524,17 @@ class HtdClient:
             if override_volume is not None:
                 volume = override_volume
 
-        return self.set_volume(zone, volume, on_increment, zone_info)
+        return self._set_volume_mca(zone, volume, on_increment, zone_info)
 
-    def _send_and_parse_all(
+
+    def _send_and_validate(
         self,
         zone: int,
         command: bytes,
         data_code: int,
-    ) -> dict[int, ZoneDetail]:
-        """
-        A shorthand method to call _send_and_parse with the is_multiple flag set to True
-
-        Args:
-            zone (int): the zone to send this instruction to
-            command (bytes): the command to send
-            data_code (int): the data value for the accompany command
-
-        Returns:
-            dict[int, ZoneDetail]: a dict where the key represents the zone number, and the value are the details of the zone
-        """
-        return self._send_and_parse(zone, command, data_code, True)
-
-    def _send_and_parse(
-        self,
-        zone: int,
-        command: bytes,
-        data_code: int,
-        is_multiple: bool = False,
         attempt: int = 0,
         enable_retry: bool = True
-    ) -> dict[int, ZoneDetail] | ZoneDetail:
+    ) -> bytes:
         """
         Send a command to the gateway and parse the response.
 
@@ -456,21 +542,19 @@ class HtdClient:
             zone (int): the zone to send this instruction to
             command (bytes): the command to send
             data_code (int): the data value for the accompany command
-            is_multiple (bool): whether to parse multiple zones from the response
             attempt (int): the number of attempts made
             enable_retry (bool): whether to attempt a retry
 
         Returns:
-            dict[int, ZoneDetail]: a single ZoneDetail if is_multiple is false, otherwise a dict where the key represents the zone number, and the value are the details of the zone
+            bytes: the response of the command
         """
         response = self._send(zone, command, data_code)
+        is_valid = validate_zone_response(response, command)
 
-        if is_multiple:
-            parsed = htd_client.utils.parse_all_zones(response)
-        else:
-            parsed = htd_client.utils.parse_single_zone(response, zone)
+        if is_valid:
+            return response
 
-        if parsed is None and enable_retry and attempt < self._retry_attempts:
+        if enable_retry and attempt < self._retry_attempts:
             _LOGGER.warning(
                 "Bad response, will retry. zone = %d, retry = %d" %
                 (zone, attempt)
@@ -480,24 +564,15 @@ class HtdClient:
             delay = self._command_delay_sec * (attempt + 1)
             time.sleep(delay)
 
-            return self._send_and_parse(
+            return self._send_and_validate(
                 zone,
                 command,
                 data_code,
-                is_multiple,
                 attempt + 1
             )
 
-        if parsed is None:
-            _LOGGER.critical(
-                (
-                    "Still bad response after retrying! zone = %d! "
-                    "Consider increasing your command_delay!"
-                )
-                % zone
-            )
+        _LOGGER.critical("Still bad response after retrying! zone = %d! " % zone)
 
-        return parsed
 
     def _send(self, zone: int, command: bytes, data_code: int) -> bytes:
         """
@@ -522,3 +597,37 @@ class HtdClient:
         connection.close()
 
         return data
+
+    def _set_kind(self, kind: HtdDeviceKind | None):
+        if kind is None:
+            model_info = self.get_model_info()
+            kind = model_info["kind"]
+
+        else:
+            if all(entry.get('kind') != kind for entry in HtdConstants.SUPPORTED_MODELS.values()):
+                kind = None
+
+        if kind is None:
+            raise NotSupportedError("Could not identify model")
+
+        return kind
+
+    def _get_common_command(self):
+        return self._pick_kind(HtdMcaCommands.QUERY_COMMAND_CODE, HtdLyncCommands.QUERY_COMMAND_CODE)
+
+    def _pick_kind(self, mca, lync):
+        return mca if self.is_mca() else lync
+
+    def _assert_lync(self):
+        if not self.is_lync():
+            raise NotSupportedError("Device is not a Lync")
+
+    def _assert_mca(self):
+        if not self.is_mca():
+            raise NotSupportedError("Device is not a MCA")
+
+    def is_lync(self):
+        return self.kind == HtdDeviceKind.lync
+
+    def is_mca(self):
+        return self.kind == HtdDeviceKind.mca

@@ -1,9 +1,12 @@
+class NotSupportedError(Exception):
+    pass
+
+
 class ZoneDetail:
     number: int = None
     power: bool = None
     mute: bool = None
     mode: bool = None
-    party: bool = None
     source: int = None
     volume: int = None
     htd_volume: int = None
@@ -16,7 +19,7 @@ class ZoneDetail:
 
     def __str__(self):
         return (
-            "zone_number = %s, power = %s, mute = %s, mode = %s, party = %s, "
+            "zone_number = %s, power = %s, mute = %s, mode = %s, "
             "source = %s, volume = %s, htd_volume = %s, "
             "treble = %s, bass = %s, balance = %s" %
             (
@@ -24,7 +27,6 @@ class ZoneDetail:
                 self.power,
                 self.mute,
                 self.mode,
-                self.party,
                 self.source,
                 self.volume,
                 self.htd_volume,

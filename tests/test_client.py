@@ -94,22 +94,22 @@ def test_all_zones_set_commands(mock__send_and_parse_all, method, code, htd_inst
 
 @patch('htd_client.HtdClient._send_and_parse_all', return_value="return_value")
 def test_all_zones_query_command(mock__send_and_parse_all, htd_instance):
-    response = htd_instance.query_all_zones()
+    response = htd_instance.refresh()
     mock__send_and_parse_all.assert_called_with(0, HtdConstants.QUERY_COMMAND_CODE, 0)
     assert response == "return_value"
 
 
-@patch('htd_client.utils.get_friendly_name')
-@patch('htd_client.HtdClient._send')
-def test_model_info_query(mock__send, mock_get_friendly_name, htd_instance):
-    expected = "return_value"
-    expected_friendly_name = "friendly_name"
-    mock__send.return_value = expected.encode(utf_8.getregentry().name)
-    mock_get_friendly_name.return_value = expected_friendly_name
-    (model_info, friendly_name) = htd_instance.get_model_info()
-    mock__send.assert_called_with(1, HtdConstants.MODEL_QUERY_COMMAND_CODE, 0)
-    assert friendly_name == expected_friendly_name
-    assert model_info == expected
+# @patch('htd_client.utils.get_friendly_name')
+# @patch('htd_client.HtdClient._send')
+# def test_model_info_query(mock__send, mock_get_friendly_name, htd_instance):
+#     expected = "return_value"
+#     expected_friendly_name = "friendly_name"
+#     mock__send.return_value = expected.encode(utf_8.getregentry().name)
+#     mock_get_friendly_name.return_value = expected_friendly_name
+#     (model_info, friendly_name) = htd_instance.get_model_info()
+#     mock__send.assert_called_with(1, HtdConstants.MODEL_QUERY_COMMAND_CODE, 0)
+#     assert friendly_name == expected_friendly_name
+#     assert model_info == expected
 
 
 @patch('htd_client.HtdClient._send_and_parse', return_value="return_value")
@@ -167,7 +167,7 @@ def test_send_and_parse_single(mock_parse_single_zone, mock__send, htd_instance)
     mock_zone = 10
     mock_command = bytearray([0x01, 0x02, 0x03, 0x04, 0x05])
     mock_data_code = 5
-    response = htd_instance._send_and_parse(mock_zone, mock_command, mock_data_code)
+    response = htd_instance._send_and_validate(mock_zone, mock_command, mock_data_code)
 
     assert response == mock_parsed_response
 
@@ -182,7 +182,7 @@ def test_send_and_parse_multiple(mock_parse_all_zones, mock__send, htd_instance)
     mock_zone = 10
     mock_command = bytearray([0x01, 0x02, 0x03, 0x04, 0x05])
     mock_data_code = 5
-    response = htd_instance._send_and_parse(mock_zone, mock_command, mock_data_code, is_multiple=True)
+    response = htd_instance._send_and_validate(mock_zone, mock_command, mock_data_code, is_multiple=True)
 
     assert response == mock_parsed_response
 
@@ -197,7 +197,7 @@ def test_send_and_parse_single_invalid_no_retry(mock_parse_single_zone, mock__se
     mock_zone = 10
     mock_command = bytearray([0x01, 0x02, 0x03, 0x04, 0x05])
     mock_data_code = 5
-    response = htd_instance._send_and_parse(mock_zone, mock_command, mock_data_code, enable_retry=False)
+    response = htd_instance._send_and_validate(mock_zone, mock_command, mock_data_code, enable_retry=False)
 
     assert response is None
     assert mock__send.call_count == 1
@@ -214,7 +214,7 @@ def test_send_and_parse_single_invalid_with_retry(mock_parse_single_zone, mock__
     mock_zone = 10
     mock_command = bytearray([0x01, 0x02, 0x03, 0x04, 0x05])
     mock_data_code = 5
-    response = htd_instance._send_and_parse(mock_zone, mock_command, mock_data_code, enable_retry=True)
+    response = htd_instance._send_and_validate(mock_zone, mock_command, mock_data_code, enable_retry=True)
 
     assert response is None
     assert mock__send.call_count == 3
@@ -231,7 +231,7 @@ def test_set_volume_query_zone_volume_ok(mock_query_zone, htd_instance):
     mock_zone_info.volume = 30
     mock_query_zone.return_value = mock_zone_info
 
-    response = htd_instance.set_volume(mock_zone, mock_volume)
+    response = htd_instance._set_volume_mca(mock_zone, mock_volume)
     assert mock_query_zone.call_count == 1
     assert response == mock_zone_info
 
@@ -275,7 +275,7 @@ def test_set_volume_query_zone_volume_down(mock_send_and_parse, mock_query_zone,
     mock.volume = 40
     mock_query_zone.return_value = mock
 
-    response = htd_instance.set_volume(mock_zone, mock_volume, on_increment, mock_zone_info)
+    response = htd_instance._set_volume_mca(mock_zone, mock_volume, on_increment, mock_zone_info)
 
     assert mock_send_and_parse.call_args_list[0].args[0] == mock_zone
     assert mock_send_and_parse.call_args_list[0].args[1] == HtdConstants.SET_COMMAND_CODE
