@@ -31,10 +31,10 @@ def create_mock_response(
 ):
     zone_data = [0] * HtdConstants.MESSAGE_CHUNK_SIZE
 
-    zone_data[HtdConstants.HEADER_BYTE_ZONE_DATA_INDEX] = HtdConstants.HEADER_BYTE
-    zone_data[HtdConstants.RESERVED_BYTE_ZONE_DATA_INDEX] = HtdConstants.RESERVED_BYTE
+    zone_data[HtdConstants.HEADER_BYTE_RESPONSE_INDEX] = HtdConstants.HEADER_BYTE
+    zone_data[HtdConstants.RESERVED_BYTE_RESPONSE_INDEX] = HtdConstants.RESERVED_BYTE
     zone_data[HtdConstants.ZONE_NUMBER_ZONE_DATA_INDEX] = zone
-    zone_data[HtdConstants.VERIFICATION_BYTE_ZONE_DATA_INDEX] = HtdConstants.VERIFICATION_BYTE
+    zone_data[HtdConstants.COMMAND_RESPONSE_BYTE_RESPONSE_INDEX] = HtdConstants.QUERY_COMMAND_CODE
 
     zone_data[HtdConstants.STATE_TOGGLES_ZONE_DATA_INDEX] = create_mock_state_toggles(state_toggles)
     zone_data[HtdConstants.SOURCE_ZONE_DATA_INDEX] = source - HtdConstants.SOURCE_QUERY_OFFSET
@@ -83,9 +83,9 @@ def test_calculate_checksum():
 
 
 def test_get_friendly_name():
-    from htd_client.utils import get_friendly_name
-    assert get_friendly_name(HtdConstants.MCA66_MODEL_NAME) == HtdConstants.MCA66_FRIENDLY_MODEL_NAME
-    assert get_friendly_name("foo") == f"Unknown (foo)"
+    from htd_client.utils import get_model_info
+    assert get_model_info(HtdConstants.MCA66_MODEL_NAME) == HtdConstants.MCA66_FRIENDLY_MODEL_NAME
+    assert get_model_info("foo") == f"Unknown (foo)"
 
 
 @pytest.mark.parametrize(
@@ -229,7 +229,7 @@ def test_parse_single_zone(mock_parse_all_zones):
 
 
 def test_test_parse_zone():
-    from htd_client.utils import parse_zone, convert_volume
+    from htd_client.utils import parse_zone_mca, convert_volume
 
     mock_zone = 1
     mock_power = True
@@ -259,7 +259,7 @@ def test_test_parse_zone():
 
     (mock_percent_volume, _) = convert_volume(mock_convert_volume(mock_htd_volume))
 
-    zone_info = parse_zone(mock_response)
+    zone_info = parse_zone_mca(mock_response)
 
     assert zone_info.number == mock_zone
     assert zone_info.power == mock_power
@@ -283,7 +283,7 @@ def test_test_parse_zone():
     ]
 )
 def test_invalid_parse_zone(zone_data):
-    from htd_client.utils import parse_zone
-    result = parse_zone(bytearray(zone_data))
+    from htd_client.utils import parse_zone_mca
+    result = parse_zone_mca(bytearray(zone_data))
 
     assert result is None

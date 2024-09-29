@@ -27,7 +27,7 @@ Here's a basic example.
 import HtdClient from htd_client
 
 client = HtdClient("192.168.1.2")
-(friendly_name, model_info) = client.get_model_info()
+model_info = client.get_model_info()
 client.volume_up()
 client.volume_down()
 
