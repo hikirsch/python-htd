@@ -24,7 +24,8 @@ Here's a basic example.
 
 ```python
 
-import HtdClient from htd_client
+import HtdClient
+from base_client
 
 client = HtdClient("192.168.1.2")
 model_info = client.get_model_info()
