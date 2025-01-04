@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from htd_client import HtdClient
+from htd_client.base_client import BaseClient
 from htd_client.constants import HtdConstants
 
 # Mock constants
@@ -17,7 +17,7 @@ MOCK_COMMAND_DELAY = 250
 
 @pytest.fixture
 def htd_instance():
-    return HtdClient(
+    return BaseClient(
         ip_address=MOCK_IP_ADDRESS,
         port=MOCK_PORT,
         retry_attempts=MOCK_RETRY_ATTEMPTS,
