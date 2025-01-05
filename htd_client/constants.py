@@ -16,6 +16,7 @@ class HtdModelInfo(TypedDict):
     friendly_name: str
     name: str
     kind: HtdDeviceKind
+    identifier: bytes
 
 
 class HtdConstants:
@@ -24,41 +25,46 @@ class HtdConstants:
     """
     # MCA66_MODEL_NAME =
     # LYNC6_MODEL_NAME =
-    # LYNC12_MODEL_NAME = 'Lync12'
+    # LYNC12_MODEL_NAME = "Lync12"
 
     SUPPORTED_MODELS: Dict[str, HtdModelInfo] = {
-        b'Wangine_MCA66': {
-            'zones': 6,
-            'sources': 6,
-            'friendly_name': 'MCA66',
-            'name': 'MCA66',
-            'kind': HtdDeviceKind.mca,
+        "mca66": {
+            "identifier": b'Wangine_MCA66',
+            "zones": 6,
+            "sources": 6,
+            "friendly_name": "MCA66",
+            "name": "MCA66",
+            "kind": HtdDeviceKind.mca,
         },
-        b'Lync 6': {
-            'zones': 6,
-            'sources': 6,
-            'friendly_name': 'Lync 6',
-            'name': 'Lync 6',
-            'kind': HtdDeviceKind.lync,
+        "lync6": {
+            "identifier": b"Lync 6",
+            "zones": 6,
+            "sources": 6,
+            "friendly_name": "Lync 6",
+            "name": "Lync 6",
+            "kind": HtdDeviceKind.lync,
         },
-        b'Lync12': {
-            'zones': 12,
-            'sources': 18,
-            'friendly_name': 'Lync 12',
-            'name': 'Lync12',
-            'kind': HtdDeviceKind.lync,
+        "lync12": {
+            "identifier": b"Lync12",
+            "zones": 12,
+            "sources": 18,
+            "friendly_name": "Lync 12",
+            "name": "Lync12",
+            "kind": HtdDeviceKind.lync,
         }
     }
 
     HEADER_BYTE = 0x02
-
     RESERVED_BYTE = 0x00
+
+    MESSAGE_HEADER = bytearray([HEADER_BYTE, RESERVED_BYTE])
+    MESSAGE_HEADER_LENGTH = len(MESSAGE_HEADER)
 
     VERIFICATION_BYTE = 0x05
 
-    # in order to not flood the device with commands, we have a delay
-    # inbetween commands, in milliseconds
-    DEFAULT_COMMAND_DELAY = 100
+    # we will issue the command to the device and validate the response, if the response
+    # is not what we expect, we will retry the command after this amount of time
+    DEFAULT_COMMAND_RETRY_TIMEOUT = 3
 
     # the device is flakey, let's retry a bunch of times
     DEFAULT_RETRY_ATTEMPTS = 5
@@ -76,6 +82,15 @@ class HtdConstants:
 
     VOLUME_OFFSET = MAX_RAW_VOLUME - MAX_VOLUME
 
+    MIN_BASS = -10
+    MAX_BASS = 10
+
+    MIN_TREBLE = -10
+    MAX_TREBLE = 10
+
+    MIN_BALANCE = -18
+    MAX_BALANCE = 18
+
     # each message we get is chunked at 14 bytes
     MESSAGE_CHUNK_SIZE = 14
 
@@ -83,22 +98,64 @@ class HtdConstants:
     ZONE_NAME_MAX_LENGTH = 10
     SOURCE_NAME_MAX_LENGTH = 10
 
+    STATE_TOGGLES_ZONE_DATA_INDEX = 0
+
+    # state toggles represent on and off values only. they are all stored
+    # within one byte. each binary digit is treated as a flag. these are
+    # indexes of each state toggle
+    POWER_STATE_TOGGLE_INDEX = 0
+    MUTE_STATE_TOGGLE_INDEX = 1
+    MODE_STATE_TOGGLE_INDEX = 2
+
     # the byte index for where to locate the corresponding setting
-    HEADER_BYTE_RESPONSE_INDEX = 0
-    RESERVED_BYTE_RESPONSE_INDEX = 1
-    ZONE_NUMBER_ZONE_DATA_INDEX = 2
-    COMMAND_RESPONSE_BYTE_RESPONSE_INDEX = 3
-    STATE_TOGGLES_ZONE_DATA_INDEX = 4 - 4
+    SOURCE_ZONE_DATA_INDEX = 4
+    VOLUME_ZONE_DATA_INDEX = 5
+    TREBLE_ZONE_DATA_INDEX = 6
+    BASS_ZONE_DATA_INDEX = 7
+    BALANCE_ZONE_DATA_INDEX = 8
 
     # when reading the source, we add this, so if unit says 0x04 it's Source 5 since + 1
     SOURCE_QUERY_OFFSET = 1
 
-
 # command codes instruct the device what mode to do,
 # it's followed with a command as well listed below
-
 class HtdCommonCommands:
     MODEL_QUERY_COMMAND_CODE = 0x08
+
+    UNDEFINED_RECEIVE_COMMAND = 0x02
+    ZONE_STATUS_RECEIVE_COMMAND = 0x05
+    KEYPAD_EXISTS_RECEIVE_COMMAND = 0x06
+    MP3_PLAY_END_RECEIVE_COMMAND = 0x09
+    ZONE_SOURCE_NAME_RECEIVE_COMMAND_MCA = 0x1f
+    ZONE_SOURCE_NAME_RECEIVE_COMMAND_LYNC = 0x0C
+    ZONE_NAME_RECEIVE_COMMAND = 0x0D
+    SOURCE_NAME_RECEIVE_COMMAND = 0x0E
+    MP3_FILE_NAME_RECEIVE_COMMAND = 0x11
+    MP3_ARTIST_NAME_RECEIVE_COMMAND = 0x12
+    MP3_ON_RECEIVE_COMMAND = 0x13
+    MP3_OFF_RECEIVE_COMMAND = 0x14
+    ERROR_RECEIVE_COMMAND = 0x1b
+
+    EXPECTED_MESSAGE_LENGTH_MAP = {
+        UNDEFINED_RECEIVE_COMMAND: 1,
+        ZONE_STATUS_RECEIVE_COMMAND: 9,
+        KEYPAD_EXISTS_RECEIVE_COMMAND: 9,
+        MP3_PLAY_END_RECEIVE_COMMAND: 1,
+        ZONE_SOURCE_NAME_RECEIVE_COMMAND_MCA: 9,
+        ZONE_SOURCE_NAME_RECEIVE_COMMAND_LYNC: 12,
+        ZONE_NAME_RECEIVE_COMMAND: 13,  # should be 11
+        SOURCE_NAME_RECEIVE_COMMAND: 13,  # should be 11
+        MP3_FILE_NAME_RECEIVE_COMMAND: 64,
+        MP3_ARTIST_NAME_RECEIVE_COMMAND: 64,
+        MP3_ON_RECEIVE_COMMAND: 1,
+        MP3_OFF_RECEIVE_COMMAND: 17,
+        ERROR_RECEIVE_COMMAND: 9,
+    }
+
+class HtdMcaConstants:
+    # when setting the source, you use the SET command and add this to the
+    # source number desired, e.g Zone 3 + 2 = data value 5, or 0x05 for mca
+    SOURCE_COMMAND_OFFSET = 2
 
 
 class HtdLyncCommands:
@@ -140,68 +197,22 @@ class HtdLyncCommands:
     SET_ZONE_NAME_COMMAND_CODE = 0x06
     SET_SOURCE_NAME_COMMAND_CODE = 0x07
 
-    UNDEFINED_RECEIVE_COMMAND = 0x02
-    ZONE_STATUS_RECEIVE_COMMAND = 0x05
-    KEYPAD_EXISTS_RECEIVE_COMMAND = 0x06
-    MP3_PLAY_END_RECEIVE_COMMAND = 0x09
-    ZONE_SOURCE_NAME_RECEIVE_COMMAND = 0x0C
-    ZONE_NAME_RECEIVE_COMMAND = 0x0D
-    SOURCE_NAME_RECEIVE_COMMAND = 0x0E
-    MP3_FILE_NAME_RECEIVE_COMMAND = 0x11
-    MP3_ARTIST_NAME_RECEIVE_COMMAND = 0x12
-    MP3_ON_RECEIVE_COMMAND = 0x13
-    MP3_OFF_RECEIVE_COMMAND = 0x14
-    ERROR_RECEIVE_COMMAND = 0x1b
 
 class HtdLyncConstants:
-
-    RECEIVE_COMMAND_EXPECTED_LENGTH_MAP = {
-        HtdLyncCommands.UNDEFINED_RECEIVE_COMMAND: 1,
-        HtdLyncCommands.ZONE_STATUS_RECEIVE_COMMAND: 9,
-        HtdLyncCommands.KEYPAD_EXISTS_RECEIVE_COMMAND: 9,
-        HtdLyncCommands.MP3_PLAY_END_RECEIVE_COMMAND: 1,
-        HtdLyncCommands.ZONE_SOURCE_NAME_RECEIVE_COMMAND: 12,
-        HtdLyncCommands.ZONE_NAME_RECEIVE_COMMAND: 13, # should be 11
-        HtdLyncCommands.SOURCE_NAME_RECEIVE_COMMAND: 13, # should be 11
-        HtdLyncCommands.MP3_FILE_NAME_RECEIVE_COMMAND: 64,
-        HtdLyncCommands.MP3_ARTIST_NAME_RECEIVE_COMMAND: 64,
-        HtdLyncCommands.MP3_ON_RECEIVE_COMMAND: 1,
-        HtdLyncCommands.MP3_OFF_RECEIVE_COMMAND: 17,
-        HtdLyncCommands.ERROR_RECEIVE_COMMAND: 9,
-    }
-
     # state toggles represent on and off values only. they are all stored
     # within one byte. each binary digit is treated as a flag. these are
     # indexes of each state toggle
 
-    POWER_STATE_TOGGLE_INDEX = 0
-    MUTE_STATE_TOGGLE_INDEX = 1
-    MODE_STATE_TOGGLE_INDEX = 2
-
-    SOURCE_ZONE_DATA_INDEX = 4
-    VOLUME_ZONE_DATA_INDEX = 9 - 4
-    TREBLE_ZONE_DATA_INDEX = 10 - 4
-    BASS_ZONE_DATA_INDEX = 11 - 4
-    BALANCE_ZONE_DATA_INDEX = 12 - 4
-
-    # when setting the source, you use the SET command and add this to the
+        # when setting the source, you use the SET command and add this to the
     # source number desired, e.g Zone 3 + 15 = data value 18, or 0x12 for lync
     SOURCE_COMMAND_OFFSET = 0x10 - 1
     SOURCE_EXTRA_ZONE_COMMAND_OFFSET = 0x63 - 1
     PARTY_MODE_COMMAND_OFFSET = 0x36 - 1
     PARTY_MODE_EXTRA_ZONE_COMMAND_OFFSET = 0x69 - 1
 
-    MIN_BASS = -10
-    MAX_BASS = 10
-
-    MIN_TREBLE = -10
-    MAX_TREBLE = 10
-
-    MIN_BALANCE = -18
-    MAX_BALANCE = 18
-
     BASS_COMMAND_OFFSET = 0x80
     TREBLE_COMMAND_OFFSET = 0x80
+
 
 class HtdMcaCommands:
     COMMON_COMMAND_CODE = 0x04
@@ -224,23 +235,3 @@ class HtdMcaCommands:
 
     QUERY_SOURCE_NAME_COMMAND_CODE = 0x1e
     SET_SOURCE_NAME_COMMAND_CODE = 0x07
-
-class HtdMcaConstants:
-    # the byte index for where to locate the corresponding setting
-    SOURCE_ZONE_DATA_INDEX = 8
-    VOLUME_ZONE_DATA_INDEX = 9
-    TREBLE_ZONE_DATA_INDEX = 10
-    BASS_ZONE_DATA_INDEX = 11
-    BALANCE_ZONE_DATA_INDEX = 12
-
-    # state toggles represent on and off values only. they are all stored
-    # within one byte. each binary digit is treated as a flag. these are
-    # indexes of each state toggle
-    POWER_STATE_TOGGLE_INDEX = 0
-    MUTE_STATE_TOGGLE_INDEX = 1
-    MODE_STATE_TOGGLE_INDEX = 2
-
-    # when setting the source, you use the SET command and add this to the
-    # source number desired, e.g Zone 3 + 2 = data value 5, or 0x05 for mca
-    SOURCE_COMMAND_OFFSET = 2
-

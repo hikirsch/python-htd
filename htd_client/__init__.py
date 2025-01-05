@@ -58,10 +58,11 @@ def get_model_info(ip_address: str, port: int = HtdConstants.DEFAULT_PORT) -> Ht
         1, HtdCommonCommands.MODEL_QUERY_COMMAND_CODE, 0
     )
 
-    model_info = htd_client.utils.send_command(cmd, ip_address, port)
+    model_id = htd_client.utils.send_command(cmd, ip_address, port)
 
-    if model_info in HtdConstants.SUPPORTED_MODELS:
-        return HtdConstants.SUPPORTED_MODELS[model_info]
+    for model_name in HtdConstants.SUPPORTED_MODELS:
+        model = HtdConstants.SUPPORTED_MODELS[model_name]
+        if model_id in model["identifier"]:
+            return model
 
-    else:
-        return None
+    return None

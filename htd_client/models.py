@@ -1,7 +1,3 @@
-class NotSupportedError(Exception):
-    pass
-
-
 class ZoneDetail:
     number: int = None
     power: bool = None
@@ -9,7 +5,6 @@ class ZoneDetail:
     mode: bool = None
     source: int = None
     volume: int = None
-    htd_volume: int = None
     treble: int = None
     bass: int = None
     balance: int = None
@@ -23,7 +18,7 @@ class ZoneDetail:
         return (
             "enabled = %s, name = %s, zone_number = %s, power = %s, "
             "mute = %s, mode = %s, source = %s, volume = %s, "
-            "htd_volume = %s, treble = %s, bass = %s, balance = %s" %
+            "treble = %s, bass = %s, balance = %s" %
             (
                 self.enabled,
                 self.name,
@@ -33,7 +28,6 @@ class ZoneDetail:
                 self.mode,
                 self.source,
                 self.volume,
-                self.htd_volume,
                 self.treble,
                 self.bass,
                 self.balance,

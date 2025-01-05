@@ -1,14 +1,13 @@
-import socket
-from encodings import utf_8
-
-from .constants import HtdConstants, HtdMcaConstants, HtdDeviceKind, MAX_BYTES_TO_RECEIVE, HtdLyncConstants
-from .models import ZoneDetail
-
 import logging
+import socket
+from typing import Literal
+
+from .constants import HtdConstants, MAX_BYTES_TO_RECEIVE
 
 _LOGGER = logging.getLogger(__name__)
 
-def build_command(zone: int, command: int, data_code: int, extra_data: bytes = None) -> bytearray:
+
+def build_command(zone: int, command: int, data_code: int, extra_data: bytearray = None) -> bytearray:
     """
     The command sequence we use to send to the device, the header and reserved bytes are always first, the zone is third, followed by the command and code.
 
@@ -24,18 +23,10 @@ def build_command(zone: int, command: int, data_code: int, extra_data: bytes = N
     cmd = [
         HtdConstants.HEADER_BYTE,
         HtdConstants.RESERVED_BYTE,
-        zone
+        zone,
+        command,
+        data_code
     ]
-
-    if isinstance(command, bytes):
-        cmd += command
-    else:
-        cmd.append(command)
-
-    if isinstance(data_code, bytes):
-        cmd += data_code
-    else:
-        cmd.append(data_code)
 
     if extra_data is not None:
         cmd += extra_data
@@ -45,17 +36,35 @@ def build_command(zone: int, command: int, data_code: int, extra_data: bytes = N
 
     return bytearray(cmd)
 
+
+def stringify_bytes_raw(data: bytes, fmt: Literal["hex", "dec"] = "hex") -> str:
+    if fmt == "hex":
+        prefix = "0x"
+        f = "02x"
+
+    elif fmt == "dec":
+        prefix = ""
+        f = "4d"
+
+    else:
+        raise ValueError("format must be 'hex' or 'dec'")
+
+    return " ".join(f"{prefix}{byte:{f}}" for byte in data)
+
+
 def stringify_bytes(data: bytes) -> str:
     position = 0
     chunk_num = 0
     ret_val = "\n"
+
     while position < len(data):
         # each chunk represents a different zone that should be 14 bytes long,
         chunk = data[position: position + HtdConstants.MESSAGE_CHUNK_SIZE]
         position += HtdConstants.MESSAGE_CHUNK_SIZE
         chunk_num += 1
-        line = f'[{chunk_num:2}] ' + ' '.join(f'0x{byte:02x}' for byte in chunk) + '\n'
-        line += f'[{chunk_num:2}] ' + ' '.join(f'{byte:4}' for byte in chunk) + '\n'
+        line = f'[{chunk_num:2}] ' + stringify_bytes_raw(chunk) + '\n'
+        line += f'[{chunk_num:2}] ' + stringify_bytes_raw(chunk, "dec") + '\n'
+        # line += f'[{chunk_num:2}] ' + decode_response(chunk) + '\n'
         ret_val += line
 
     return ret_val
@@ -73,9 +82,8 @@ def send_command(
     return data
 
 
-def convert_balance_value_mca(value: int):
-    signed_val = (value - 0x100) if value > 0x7F else value
-    return signed_val
+def convert_value(value: int):
+    return value - 0x100 if value > 0x7F else value
 
 
 def convert_volume(raw_volume: int) -> (int, int):
@@ -89,15 +97,14 @@ def convert_volume(raw_volume: int) -> (int, int):
         (int, int): A tuple where the first number is a percentage, and the second is the raw volume from 0 to 60
     """
     if raw_volume == 0:
-        return 100, HtdConstants.MAX_VOLUME
+        return HtdConstants.MAX_VOLUME
 
     htd_volume = raw_volume - HtdConstants.VOLUME_OFFSET
-    percent_volume = round(htd_volume / HtdConstants.MAX_VOLUME * 100)
-    fixed = max(0, min(100, percent_volume))
-    return fixed, htd_volume
+
+    return htd_volume
 
 
-def convert_htd_volume_to_raw(volume: int) -> int:
+def convert_volume_to_raw(volume: int) -> int:
     if volume == 0:
         return 0
 
@@ -114,11 +121,7 @@ def calculate_checksum(message: [int]) -> int:
     Returns:
         int: the sum of the message ints
     """
-    cs = 0
-    for b in message:
-        cs += b
-    cs &= 0xff
-    return cs
+    return sum(message) & 0xff
 
 
 def is_bit_on(toggles: str, index: int) -> bool:
@@ -133,176 +136,6 @@ def is_bit_on(toggles: str, index: int) -> bool:
         bool: if the bit is on
     """
     return toggles[index] == "1"
-
-
-def validate_source(source: int):
-    """
-    A helper method to validate the source is not outside the range. If it's invalid, an Exception is raised, otherwise nothing will happen.
-
-    Args:
-        source (int): the source number to validate
-
-    Raises:
-        Exception: source X is invalid
-    """
-    # if source not in range(1, HtdConstants.MAX_HTD_SOURCES + 1):
-    #     raise Exception("source %s is invalid" % source)
-    pass
-
-
-def validate_zone(zone: int):
-    """
-    A helper method to validate the zone is not outside the range. If it's invalid, an Exception is raised, otherwise nothing will happen.
-
-    Args:
-        zone (int): the zone to validate
-
-    Raises:
-        Exception - zone X is invalid
-    """
-    # if zone not in range(1, HtdConstants.MAX_HTD_ZONES + 1):
-    #     raise Exception("zone %s is invalid" % zone)
-    pass
-
-
-def validate_zone_response(zone_data: bytes) -> bool:
-    return (
-        zone_data[HtdConstants.HEADER_BYTE_RESPONSE_INDEX] == HtdConstants.HEADER_BYTE and
-        zone_data[HtdConstants.RESERVED_BYTE_RESPONSE_INDEX] == HtdConstants.RESERVED_BYTE
-        # and zone_data[HtdConstants.COMMAND_RESPONSE_BYTE_RESPONSE_INDEX] == command
-    )
-
-def validate_zone_response_2(zone_data: bytes) -> bool:
-    return (
-        zone_data[HtdConstants.HEADER_BYTE_RESPONSE_INDEX] == HtdConstants.HEADER_BYTE or zone_data[HtdConstants.HEADER_BYTE_RESPONSE_INDEX] == 20 and
-        zone_data[HtdConstants.RESERVED_BYTE_RESPONSE_INDEX] == HtdConstants.RESERVED_BYTE
-    )
-
-
-# credit for this new parser goes to lounsbrough
-def parse_zone_mca(zone_data: bytes) -> ZoneDetail | None:
-    """
-    This will take a single message chunk of 14 bytes and parse this into a usable `ZoneDetail` model to read the state.
-
-    Parameters:
-        zone_data (bytes): an array of bytes representing a zone
-
-    Returns:
-        ZoneDetail - a parsed instance of zone_data normalized or None if invalid
-    """
-    zone_number = zone_data[HtdConstants.ZONE_NUMBER_ZONE_DATA_INDEX]
-
-    if zone_number == 0:
-        return None
-
-    # the 4th position represent the toggles for power, mute, mode and party,
-    state_toggles = to_binary_string(
-        zone_data[HtdConstants.STATE_TOGGLES_ZONE_DATA_INDEX]
-    )
-
-    volume, htd_volume = convert_volume(
-        zone_data[HtdMcaConstants.VOLUME_ZONE_DATA_INDEX]
-    )
-
-    zone = ZoneDetail(zone_number)
-
-    zone.number = zone_number
-    zone.power = is_bit_on(
-        state_toggles,
-        HtdMcaConstants.POWER_STATE_TOGGLE_INDEX
-    )
-    zone.mute = is_bit_on(state_toggles, HtdMcaConstants.MUTE_STATE_TOGGLE_INDEX)
-    zone.mode = is_bit_on(state_toggles, HtdMcaConstants.MODE_STATE_TOGGLE_INDEX)
-
-    zone.source = zone_data[HtdMcaConstants.SOURCE_ZONE_DATA_INDEX] + HtdConstants.SOURCE_QUERY_OFFSET
-    zone.volume = volume
-    zone.htd_volume = htd_volume
-    zone.treble = convert_balance_value_mca(zone_data[HtdMcaConstants.TREBLE_ZONE_DATA_INDEX])
-    zone.bass = convert_balance_value_mca(zone_data[HtdMcaConstants.BASS_ZONE_DATA_INDEX])
-    zone.balance = convert_balance_value_mca(zone_data[HtdMcaConstants.BALANCE_ZONE_DATA_INDEX])
-
-    return zone
-
-
-def parse_zone_lync(zone_number: int, zone_data: bytes) -> ZoneDetail | None:
-    """
-    This will take a single message chunk of 14 bytes and parse this into a usable `ZoneDetail` model to read the state.
-
-    Parameters:
-        zone_data (bytes): an array of bytes representing a zone
-
-    Returns:
-        ZoneDetail - a parsed instance of zone_data normalized or None if invalid
-    """
-
-    # zone_number = zone_data[HtdConstants.ZONE_NUMBER_ZONE_DATA_INDEX]
-    #
-    # if zone_number == 0:
-    #     return None
-
-    # the 4th position represent the toggles for power, mute, mode and party,
-    state_toggles = to_binary_string(
-        zone_data[HtdConstants.STATE_TOGGLES_ZONE_DATA_INDEX]
-    )
-
-    # for lync, the toggles are read backwards
-    state_toggles = state_toggles[::-1]
-
-    volume, htd_volume = convert_volume(
-        zone_data[HtdLyncConstants.VOLUME_ZONE_DATA_INDEX]
-    )
-
-    zone = ZoneDetail(zone_number)
-
-    zone.power = is_bit_on(
-        state_toggles,
-        HtdMcaConstants.POWER_STATE_TOGGLE_INDEX
-    )
-    zone.mute = is_bit_on(state_toggles, HtdLyncConstants.MUTE_STATE_TOGGLE_INDEX)
-    zone.mode = is_bit_on(state_toggles, HtdLyncConstants.MODE_STATE_TOGGLE_INDEX)
-
-    zone.source = zone_data[HtdLyncConstants.SOURCE_ZONE_DATA_INDEX] + HtdConstants.SOURCE_QUERY_OFFSET
-    zone.volume = volume
-    zone.htd_volume = htd_volume
-    zone.treble = zone_data[HtdLyncConstants.TREBLE_ZONE_DATA_INDEX]
-    zone.bass = zone_data[HtdLyncConstants.BASS_ZONE_DATA_INDEX]
-    zone.balance = zone_data[HtdLyncConstants.BALANCE_ZONE_DATA_INDEX]
-
-    return zone
-
-
-def parse_all_zones(data: bytes, kind: HtdDeviceKind) -> dict[int, ZoneDetail]:
-    """
-    The handler method to take the entire response from the controller and parses each zone.
-
-    Args:
-        data (bytes): the full response from the device, represents all the zones to be parsed
-        kind (HtdDeviceKind): which htd device is the message from, so we know how to parse it.
-
-    Returns:
-        dict[int, ZoneDetail]: a dict where the key represents the zone number, and the value are the details of the zone
-    """
-    position = 0
-    zones = {}
-
-    while position < len(data):
-        # each chunk represents a different zone that should be 14 bytes long,
-        zone_data = data[position: position + HtdConstants.MESSAGE_CHUNK_SIZE]
-        position += HtdConstants.MESSAGE_CHUNK_SIZE
-
-        # if the zone data we got is less than the exp
-        if len(zone_data) < HtdConstants.MESSAGE_CHUNK_SIZE:
-            break
-
-        parse_zone = parse_zone_lync if kind == HtdDeviceKind.lync else parse_zone_mca
-
-        zone_info = parse_zone(zone_data)
-
-        # if a valid zone was found, we're done
-        if zone_info is not None:
-            zones[zone_info.number] = zone_info
-
-    return zones
 
 
 def to_binary_string(raw_value: int) -> str:
@@ -341,12 +174,4 @@ def parse_zone_name(data: bytes):
 
 
 def decode_response(response: bytes):
-    return response.decode(utf_8.getregentry().name, errors="replace")
-
-
-def int_to_bytes(number: int) -> bytearray:
-    # return number.to_bytes(1, byteorder="little")
-    return bytearray([number])
-
-def str_to_bytes(string: str) -> bytes:
-    return string.encode()
+    return response.decode(errors="replace")

@@ -12,28 +12,15 @@
     updated_zone_info = client.volume_up(1)
 """
 import asyncio
-import socket
-
-LYNC_HEADER = b'\x02\x00'
-MESSAGE_HEADER_LENGTH = len(LYNC_HEADER)
-
 import logging
+import socket
 import threading
 import time
 from abc import abstractmethod
 from typing import Dict
 
 import htd_client
-
-from .constants import (
-    HtdConstants,
-    HtdDeviceKind,
-    ONE_SECOND,
-    HtdLyncConstants,
-    HtdLyncCommands,
-    MAX_BYTES_TO_RECEIVE,
-    HtdModelInfo,
-)
+from .constants import HtdConstants, HtdDeviceKind, ONE_SECOND, MAX_BYTES_TO_RECEIVE, HtdModelInfo, HtdCommonCommands
 from .models import ZoneDetail
 
 _LOGGER = logging.getLogger(__name__)
@@ -43,6 +30,7 @@ class BaseClient:
     _kind: HtdDeviceKind = None
     _ip_address: str = None
     _port: int = None
+    _command_retry_timeout: int = None
     _retry_attempts: int = None
     _socket_timeout_sec: float = None
     _buf: bytearray = None
@@ -52,10 +40,11 @@ class BaseClient:
     _socket_thread: threading.Thread = None
     _socket_lock: threading.Lock = None
 
-    _is_ready: bool = False
-    _zones_loaded: int = 0
-    _callbacks: set = None
     _connected: bool = False
+    _zones_loaded: int = 0
+    _is_ready: bool = False
+
+    _subscribers: set = None
     _loop: asyncio.AbstractEventLoop = None
 
     def __init__(
@@ -63,34 +52,77 @@ class BaseClient:
         kind: HtdDeviceKind,
         ip_address: str,
         port: int = HtdConstants.DEFAULT_PORT,
+        command_retry_timeout: int = HtdConstants.DEFAULT_COMMAND_RETRY_TIMEOUT,
         retry_attempts: int = HtdConstants.DEFAULT_RETRY_ATTEMPTS,
         socket_timeout: int = HtdConstants.DEFAULT_SOCKET_TIMEOUT
     ):
         self._kind = kind
         self._ip_address = ip_address
         self._port = port
+        self._command_retry_timeout = command_retry_timeout
         self._retry_attempts = retry_attempts
         self._socket_timeout_sec = socket_timeout / ONE_SECOND
         self._buf = bytearray()
         self._zone_data = {}
-        self._callbacks = set()
+        self._subscribers = set()
         self._socket_lock = threading.Lock()
+        self._callback_lock = threading.Lock()
         self._loop = asyncio.get_event_loop()
+        self._should_disconnect = False
+        self._connected = False
         self._model_info = htd_client.get_model_info(self._ip_address, self._port)
 
-        self._connect()
+        self.connect()
 
+    def subscribe(self, callback):
+        self._subscribers.add(callback)
 
-    def register_callback(self, callback):
-        self._callbacks.add(callback)
-
+        # if we're already ready, call the callback immediately and let them update
         if self._is_ready:
             callback()
 
-    def remove_callback(self, callback):
-        self._callbacks.discard(callback)
+    def unsubscribe(self, callback):
+        self._subscribers.discard(callback)
 
-    def _connect(self):
+    def _broadcast(self, zone: int):
+        while self._callback_lock.locked():
+            pass
+
+        with self._callback_lock:
+            for callback in self._subscribers:
+                callback(zone)
+
+    def is_ready(self):
+        return self._is_ready
+
+    def connect(self):
+        if self._connected:
+            _LOGGER.info("Trying to connect but already connected")
+            return
+
+        self._socket_thread = threading.Thread(target=self._connection_thread)
+        self._socket_thread.daemon = True
+        self._socket_thread.start()
+
+        start_time = time.time()
+        current_time = time.time()
+        refresh_count = 0
+
+        while not self._is_ready and current_time - start_time < self._socket_timeout_sec:
+            current_time = time.time()
+
+            if refresh_count * self._command_retry_timeout < int(current_time - start_time):
+                refresh_count += 1
+                self.refresh()
+
+
+    def disconnect(self):
+        self._should_disconnect = True
+
+    def _connection_thread(self):
+        # ensure we can connect, this will get set to True from an external thread
+        self.should_disconnect = False
+
         address = (self._ip_address, self._port)
 
         _LOGGER.info("connecting to %s:%s" % address)
@@ -100,126 +132,229 @@ class BaseClient:
             timeout=self._socket_timeout_sec,
         )
 
-        self._socket_thread = threading.Thread(target=self._on_message)
-        self._socket_thread.daemon = True
-        self._socket_thread.start()
-
-        start_time = time.time()
-        current_time = time.time()
-        refresh_count = 0
-        refresh_timeout = 5
-
-        while len(self._zone_data) == 0 and current_time - start_time < self._socket_timeout_sec:
-            current_time = time.time()
-
-            if refresh_count * refresh_timeout < int(current_time - start_time):
-                refresh_count += 1
-                self.refresh()
-
         self._connected = True
 
-    def _on_message(self):
-        while True:
+        _LOGGER.info("connected")
+
+        while not self._should_disconnect:
+            zone = None
+
             try:
                 data = self._connection.recv(MAX_BYTES_TO_RECEIVE)
+                _LOGGER.debug("Received data %s" % htd_client.utils.stringify_bytes(data))
 
                 if len(data) == 0:
                     break
 
                 with self._socket_lock:
                     while len(data) > 0:
-                        chunk_length = self.process_next_command(data)
+                        (zone, chunk_length) = self._process_next_command(data)
                         data = data[chunk_length:]
 
             except Exception as e:
-                print(f"Error receiving data: {e}")
+                _LOGGER.error(f"Error processing data!")
+                _LOGGER.exception(e)
                 break
 
-            self.publish_update()
+            self._loop.run_in_executor(None, self._broadcast, zone)
 
+        self._connected = False
+        _LOGGER.error("Disconnected!!")
 
-    def process_next_command(self, data):
-        """ Process the lync frame data.  Search for the frame sync bytes and process one
-            frame from the buffer.  Return the start of the next frame. """
+    def _process_next_command(self, data: bytes):
+        """
+        Process the next command in the buffer.
+        Credit to https://github.com/dustinmcintire/htd-lync
+
+        Args:
+            data (bytes): the data to process
+        """
 
         # start with search for command header and id the command
         # not enough data, 2 reserved header bits, zone + command + data + checksum = 4, is minimum length
-        if len(data) < MESSAGE_HEADER_LENGTH + 4:
-            return 0
+        if len(data) < HtdConstants.MESSAGE_HEADER_LENGTH + 4:
+            return None, 0
 
-        start_message_index = data.find(LYNC_HEADER)
+        start_message_index = data.find(HtdConstants.MESSAGE_HEADER)
 
         if start_message_index < 0:
-            return len(data)
+            return None, len(data)
 
         if start_message_index != 0:
             _LOGGER.debug("Bad sync buffer! %s" % htd_client.utils.stringify_bytes(data))
 
         # offsets to packet data, zones, command, and then data
-        zone_idx = start_message_index + MESSAGE_HEADER_LENGTH
+        zone_idx = start_message_index + HtdConstants.MESSAGE_HEADER_LENGTH
         cmd_idx = zone_idx + 1
         data_idx = cmd_idx + 1
 
-        # not enough data, wait for more
+        # not enough data, wait for more-
         if len(data) < data_idx:
-            return 0
+            return None, 0
 
         zone = int(data[zone_idx])
         command = data[cmd_idx]
 
         # Skip over bad command
         # return the minimum packet size for resync
-        if command not in HtdLyncConstants.RECEIVE_COMMAND_EXPECTED_LENGTH_MAP:
+        if command not in HtdCommonCommands.EXPECTED_MESSAGE_LENGTH_MAP:
             _LOGGER.error(
-                "Invalid command value: zone = %d, command = %s, data = %s" %
+                "Invalid command value: zone = %d, command = %s (%d).  data = %s" %
                 (
                     zone,
-                    htd_client.utils.stringify_bytes(command),
+                    htd_client.utils.stringify_bytes_raw(bytearray([command])),
+                    command,
                     htd_client.utils.stringify_bytes(data),
                 )
             )
 
-            return start_message_index + MESSAGE_HEADER_LENGTH
+            return None, start_message_index + HtdConstants.MESSAGE_HEADER_LENGTH
 
-        expected_length = HtdLyncConstants.RECEIVE_COMMAND_EXPECTED_LENGTH_MAP[command]
+        expected_length = HtdCommonCommands.EXPECTED_MESSAGE_LENGTH_MAP[command]
 
-        # _LOGGER.debug("Got command: %s zone: %d name: %s", c[cmd_idx], zone, cmd_name)
-        if command == HtdLyncCommands.UNDEFINED_RECEIVE_COMMAND:
+        if command == HtdCommonCommands.UNDEFINED_RECEIVE_COMMAND:
             _LOGGER.info("Undefined response command: %02x", int(command))
             _LOGGER.debug("Packet buffer: %s", htd_client.utils.stringify_bytes(data[0:20]))
-            return start_message_index + MESSAGE_HEADER_LENGTH
+            return start_message_index + HtdConstants.MESSAGE_HEADER_LENGTH
 
         # not enough data, wait for more
         if len(data) < data_idx + expected_length:
-            return 0
+            return None, 0
 
-        end_message_index = start_message_index + MESSAGE_HEADER_LENGTH + 2 + expected_length
+        end_message_index = start_message_index + HtdConstants.MESSAGE_HEADER_LENGTH + 2 + expected_length
         chunk_length = end_message_index + 1
 
         # process the content to the current state
         frame = data[start_message_index:end_message_index]
         checksum = data[end_message_index]
-        frame_sum_checksum = sum(frame) & 0xff
+        frame_sum_checksum = htd_client.utils.calculate_checksum(frame)
 
         # validate the checksum
         if frame_sum_checksum == checksum:
-            chunk = data[0:chunk_length]
-
-            _LOGGER.debug("Processing chunk %s" % htd_client.utils.stringify_bytes(chunk))
+            # chunk = data[start_message_index:end_message_index]
+            _LOGGER.debug("Processing chunk %s" % htd_client.utils.stringify_bytes(frame))
 
             frame = data[data_idx:data_idx + expected_length]
             self._parse_command(zone, command, frame)
 
-            if not self._is_ready and command == HtdLyncCommands.ZONE_STATUS_RECEIVE_COMMAND:
+            if not self._is_ready and command == HtdCommonCommands.ZONE_STATUS_RECEIVE_COMMAND:
                 self._zones_loaded += 1
                 if self._zones_loaded == self._model_info['zones']:
                     self._is_ready = True
 
-
         else:
             _LOGGER.info("Bad checksum %02x != %02x", frame_sum_checksum, checksum)
 
-        return chunk_length
+        return zone, chunk_length
+
+    def _parse_command(self, zone, cmd, data):
+        if cmd == HtdCommonCommands.KEYPAD_EXISTS_RECEIVE_COMMAND:
+            # this is zone 0 with all zone data
+            # second byte is zone 1 - 8
+            for i in range(8):
+                enabled = data[1] & (1 << i) > 0
+                self._zone_data[i + 1] = ZoneDetail(i + 1, enabled)
+
+            # fourth byte is zone 9 - 16
+            for i in range(8):
+                enabled = data[3] & (1 << i) > 0
+                self._zone_data[i + 9] = ZoneDetail(i + 9, enabled)
+
+            # third byte is keypad 1 - 8
+            # for i in range(8):
+            #     if data[2] & (1 << i):
+            #         self.zone_info[i]['keypad'] = 'yes'
+            #     else:
+            #         self.zone_info[i]['keypad'] = 'no'
+
+            # fifth byte is keypad 8-15
+            # for i in range(8):
+            #     if data[4] & (1 << i):
+            #         self.zone_info[i + 8]['keypad'] = 'yes'
+            #     else:
+            #         self.zone_info[i + 8]['keypad'] = 'no'
+
+        elif cmd == HtdCommonCommands.ZONE_STATUS_RECEIVE_COMMAND:
+            zone_data = self._parse_zone(zone, data)
+            zone_data.enabled = self._zone_data[zone].enabled
+            self._zone_data[zone] = zone_data
+            _LOGGER.debug("Got new state: %s", zone_data)
+
+        elif cmd == HtdCommonCommands.ZONE_SOURCE_NAME_RECEIVE_COMMAND_MCA:
+            zone_source_name = str(data[2:9].decode(errors="ignore").strip('\0')).lower()
+            print("ZONE SOURCE NAME NOT USED, zone %d, zone_source_name = %s" % (zone, zone_source_name))
+
+        elif cmd == HtdCommonCommands.ZONE_SOURCE_NAME_RECEIVE_COMMAND_LYNC:
+            # remove the extra null bytes
+            zone_source_name = str(data[0:11].decode().rstrip('\0')).lower()
+            print("ZONE SOURCE NAME NOT USED, zone_source_name = %s" % zone_source_name)
+
+        elif cmd == HtdCommonCommands.ZONE_NAME_RECEIVE_COMMAND:
+            name = str(data[0:11].decode().rstrip('\0')).lower()
+            self._zone_data[zone].name = name
+
+        elif cmd == HtdCommonCommands.SOURCE_NAME_RECEIVE_COMMAND:
+            source = data[11]
+            name = str(data[0:10].decode().rstrip('\0')).lower()
+            print("GOT SOURCE NAME NOT USED, source = %s, name = %s" % (source, name))
+            # self.zone_info[zone]['source_list'][source] = name
+            # self.source_info[zone][name] = source
+        #
+        # elif cmd == HtdCommonCommands.MP3_ON_RECEIVE_COMMAND:
+        #     self.mp3_status['state'] = 'on'
+        #
+        # elif cmd == HtdCommonCommands.MP3_OFF_RECEIVE_COMMAND:
+        #     self.mp3_status['state'] = 'off'
+        #
+        # elif cmd == HtdCommonCommands.MP3_FILE_NAME_RECEIVE_COMMAND:
+        #     self.mp3_status['file'] = data.decode().rstrip('\0')
+        #
+        # elif cmd == HtdCommonCommands.MP3_ARTIST_NAME_RECEIVE_COMMAND:
+        #     self.mp3_status['artist'] = data.decode().rstrip('\0')
+
+        elif cmd == HtdCommonCommands.ERROR_RECEIVE_COMMAND:
+            _LOGGER.warning("HTD Error Response Code: %s", data[0])
+
+        else:
+            _LOGGER.info("Unknown command processed, ignoring: %s", cmd)
+
+    def _parse_zone(self, zone_number: int, zone_data: bytearray) -> ZoneDetail | None:
+        """
+        This will take a single message chunk of 14 bytes and parse this into a usable `ZoneDetail` model to read the state.
+
+        Parameters:
+            zone_number (int): the zone number this data is for
+            zone_data (bytes): an array of bytes representing a zone
+
+        Returns:
+            ZoneDetail - a parsed instance of zone_data normalized or None if invalid
+        """
+
+        # the 4th position represent the toggles for power, mute, mode and party,
+        state_toggles = htd_client.utils.to_binary_string(
+            zone_data[HtdConstants.STATE_TOGGLES_ZONE_DATA_INDEX]
+        )
+
+        volume = htd_client.utils.convert_volume(
+            zone_data[HtdConstants.VOLUME_ZONE_DATA_INDEX]
+        )
+
+        zone = ZoneDetail(zone_number)
+
+        zone.power = htd_client.utils.is_bit_on(
+            state_toggles,
+            HtdConstants.POWER_STATE_TOGGLE_INDEX
+        )
+        zone.mute = htd_client.utils.is_bit_on(state_toggles, HtdConstants.MUTE_STATE_TOGGLE_INDEX)
+        zone.mode = htd_client.utils.is_bit_on(state_toggles, HtdConstants.MODE_STATE_TOGGLE_INDEX)
+
+        zone.source = zone_data[HtdConstants.SOURCE_ZONE_DATA_INDEX] + HtdConstants.SOURCE_QUERY_OFFSET
+        zone.volume = volume
+        zone.treble = htd_client.utils.convert_value(zone_data[HtdConstants.TREBLE_ZONE_DATA_INDEX])
+        zone.bass = htd_client.utils.convert_value(zone_data[HtdConstants.BASS_ZONE_DATA_INDEX])
+        zone.balance = htd_client.utils.convert_value(zone_data[HtdConstants.BALANCE_ZONE_DATA_INDEX])
+
+        return zone
 
     def _send_and_validate(
         self,
@@ -238,17 +373,18 @@ class BaseClient:
             zone (int): the zone to send this instruction to
             command (bytes): the command to send
             data_code (int): the data value for the accompany command
+            extra_data (bytes): the extra data to send with the command
+            follow_up (tuple): a tuple of command and data_code to send after the initial command
 
         Returns:
             bytes: the response of the command
         """
 
         attempts = 0
-        retry_time = .25
         last_attempt_time = 0
 
         while not validate(self.get_zone(zone)):
-            if time.time() - last_attempt_time > retry_time:
+            if time.time() - last_attempt_time > self._command_retry_timeout:
                 attempts += 1
 
                 if attempts > self._retry_attempts:
@@ -256,7 +392,8 @@ class BaseClient:
 
                 # we only want to call refresh if we have already tried
                 if last_attempt_time != 0:
-                    self.refresh()
+                    self.refresh(zone)
+
                 self._send_cmd(zone, command, data_code, extra_data)
 
                 # setting volume on lync requires you to unmute, so a followup command is used
@@ -279,9 +416,6 @@ class BaseClient:
         _LOGGER.debug("sending command %s" % htd_client.utils.stringify_bytes(cmd))
         self._connection.send(cmd)
 
-    @abstractmethod
-    def get_zone_names(self) -> str:
-        pass
 
     def get_zone_count(self) -> int:
         """
@@ -307,17 +441,22 @@ class BaseClient:
         """
         return self._zone_data[zone]
 
+    def toggle_mute(self, zone: int):
+        """
+        Toggle the mute state of a zone.
+
+        Args:
+            zone (int): the zone to toggle
+        """
+        zone_detail = self.get_zone(zone)
+
+        if zone_detail.mute:
+            self.unmute(zone)
+        else:
+            self.mute(zone)
 
     @abstractmethod
-    def refresh(self):
-        pass
-
-    @abstractmethod
-    def _parse_command(self, zone: int, command: int, data: bytearray):
-        pass
-
-    @abstractmethod
-    def get_firmware_version(self) -> str:
+    def refresh(self, zone: int = None):
         pass
 
     @abstractmethod
@@ -352,20 +491,6 @@ class BaseClient:
     def unmute(self, zone: int):
         pass
 
-    def toggle_mute(self, zone: int):
-        """
-        Toggle the mute state of a zone.
-
-        Args:
-            zone (int): the zone to toggle
-        """
-        zone_detail = self.get_zone(zone)
-
-        if zone_detail.mute:
-            self.unmute(zone)
-        else:
-            self.mute(zone)
-
     @abstractmethod
     def power_on(self, zone: int):
         pass
@@ -397,7 +522,3 @@ class BaseClient:
     @abstractmethod
     def balance_right(self, zone: int):
         pass
-
-    def publish_update(self):
-        for callback in self._callbacks:
-            callback()
