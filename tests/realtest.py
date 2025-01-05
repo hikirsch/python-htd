@@ -3,11 +3,11 @@ import time
 
 from htd_client import BaseClient, get_client, HtdDeviceKind, get_model_info
 
-MY_IP = ""
+MCA66_IP = ""
 LYNC_12_TEST = ""
 
 def reset_to_normal(power=True):
-    client = get_client(HtdDeviceKind.lync, MY_IP, 10006)
+    client = get_client(HtdDeviceKind.mca, MCA66_IP, 10006)
 
     delay = 25 / 1000
     attempts_until_refresh = 20
@@ -57,15 +57,15 @@ def countdown(seconds):
         seconds -= 1
 
 def identify_test():
-    model_info = get_model_info(MY_IP)
-    # model_info = get_model_info(REMOTE_IP, 9001)
+    model_info = get_model_info(MCA66_IP)
     print(model_info)
-    client = get_client(HtdDeviceKind.lync, MY_IP, port=10006)
-    # client = get_client(HtdDeviceKind.lync, REMOTE_IP, 9001)
+    model_info = get_model_info(LYNC_12_TEST, 9001)
+    print(model_info)
+    client_mca = get_client(HtdDeviceKind.mca, MCA66_IP, port=10006)
+    client_lync = get_client(HtdDeviceKind.lync, LYNC_12_TEST, 9001)
     # print(response)
 
-
-    client.power_off(6)
+    # client.power_off(6)
 
     # client.get_zone_names()
 
@@ -76,20 +76,43 @@ def identify_test():
 
     countdown(1)
 
-    print("")
-    print("Showing all zones")
-    print("")
-    zone_count = client.get_zone_count()
-    for i in range(1, zone_count + 1):
-        print(client.get_zone(i))
+    def run_test(description: str, client: BaseClient):
+        print("")
+        print(f"Showing all zones for {description}")
+        print("")
+        zone_count = client.get_zone_count()
+        for i in range(1, zone_count + 1):
+            print(client.get_zone(i))
+
+        # client.volume_test()
+        #
+        # print("")
+        # print("Showing all zones")
+        # print("")
+        # zone_count = client.get_zone_count()
+        # for i in range(1, zone_count + 1):
+        #     print(client.get_zone(i))
+
+    run_test("MCA", client_mca)
+    run_test("LYNC", client_lync)
 
 
-    print("")
+    # print("")
     # test_zone_command(client.power_off, 1, "power_off")
     # test_zone_command(client.power_on, 1, "power_on")
-    # test_zone_command(client.volume_up, 1, "volume_up")
-    # test_zone_command(client.volume_down, 1, "volume_down")
-    # test_zone_command(client.toggle_mute, 1, "toggle_mute")
+    # # test_zone_command(client.volume_up, 1, "volume_up")
+    # # test_zone_command(client.volume_down, 1, "volume_down")
+    # test_command(lambda: client.set_volume(1, 50), "set_volume")
+    # while client.get_zone(1).htd_volume != 50:
+    #     pass
+    #
+    # test_zone_command(client.set_volume, 10, "set_volume")
+    #
+    # while client.get_zone(1).htd_volume != 10:
+    #     pass
+    #
+    # test_zone_command(client.mute, 1, "mute")
+    # test_zone_command(client.unmute, 1, "unmute")
     # test_client(client)
     # model_info = client.get_model_info()
     # client.set_zone_name_lync(1, "Zone 1")
@@ -97,8 +120,8 @@ def identify_test():
     # client.set_source_name_lync(2, 1, 'SRC 2')
 
     # for i in range(1, model_info["zones"] + 1):
-    #     test_zone_command(client.query_zone_name, i, "query_zone_name")
-    # #
+        # test_zone_command(client.query_zone_name, i, "query_zone_name")
+    #
     # for zone in range(1, model_info["zones"] + 1):
     #     for source in range(1, model_info["sources"] + 1):
     #         test_source_command(client.query_source_name_lync, source, zone, "query_source_name_lync")
@@ -109,7 +132,7 @@ def identify_test():
 
 
 def device_test():
-    client = get_client(HtdDeviceKind.lync, MY_IP, 10006)
+    client = get_client(HtdDeviceKind.lync, MCA66_IP, 10006)
     # client = get_client(HtdDeviceKind.lync, "69.76.150.235", 9001)
     if client._connected:
         print("Connected ")
@@ -320,7 +343,7 @@ def chunkize(data, chunk_size):
     return [data[i:i + chunk_size] for i in range(0, len(data), chunk_size)]
 
 
-if __name__ == "main":
+if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
     # reset_to_normal()
     # device_test()
