@@ -7,7 +7,7 @@ MCA66_TEST = ""
 LYNC_12_TEST = ""
 
 def reset_to_normal(power=True):
-    client = get_client(HtdDeviceKind.mca, MCA66_TEST, 10006)
+    client = get_client(HtdDeviceKind.lync, MCA66_TEST, 10006)
 
     delay = 25 / 1000
     attempts_until_refresh = 20
@@ -61,7 +61,7 @@ def identify_test():
     print(model_info)
     model_info = get_model_info(LYNC_12_TEST, 9001)
     print(model_info)
-    client_mca = get_client(HtdDeviceKind.mca, MCA66_TEST, port=10006)
+    client_mca = get_client(HtdDeviceKind.lync, MCA66_TEST, port=10006)
     client_lync = get_client(HtdDeviceKind.lync, LYNC_12_TEST, 9001)
     # print(response)
 
