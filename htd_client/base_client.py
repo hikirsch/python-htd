@@ -102,8 +102,23 @@ class BaseClient:
 
     def connect(self):
         if self._connected:
-            _LOGGER.info("Trying to connect but already connected")
+            _LOGGER.debug("Trying to connect but already connected")
             return
+
+        address = (self._ip_address, self._port)
+
+        _LOGGER.debug("connecting to %s:%s" % address)
+
+        self._connection = socket.create_connection(
+            address=address,
+            timeout=self._socket_timeout_sec,
+        )
+
+        self.refresh()
+
+        self._connected = True
+
+        _LOGGER.debug("connected")
 
         self._socket_thread = threading.Thread(target=self._connection_thread)
         self._socket_thread.daemon = True
@@ -121,27 +136,11 @@ class BaseClient:
                 refresh_count += 1
                 self.refresh()
 
-
     def disconnect(self):
         self._should_disconnect = True
 
     def _connection_thread(self):
         # ensure we can connect, this will get set to True from an external thread
-        address = (self._ip_address, self._port)
-
-        _LOGGER.info("connecting to %s:%s" % address)
-
-        self._connection = socket.create_connection(
-            address=address,
-            timeout=self._socket_timeout_sec,
-        )
-
-        self._connected = True
-
-        self._broadcast()
-
-        _LOGGER.info("connected")
-
         self.should_disconnect = False
 
         while not self._should_disconnect:
@@ -159,14 +158,15 @@ class BaseClient:
                         (zone, chunk_length) = self._process_next_command(data)
                         data = data[chunk_length:]
 
+                        if zone is not None and zone > 0:
+                            self._loop.run_in_executor(None, self._broadcast, zone)
+
             except socket.timeout:
                 pass
 
             except Exception as e:
                 _LOGGER.error(f"Error processing data!")
                 _LOGGER.exception(e)
-
-            self._loop.run_in_executor(None, self._broadcast, zone)
 
         self._connected = False
         _LOGGER.error("Disconnected!!")
@@ -427,7 +427,6 @@ class BaseClient:
         cmd = htd_client.utils.build_command(zone, command, data_code, extra_data)
         _LOGGER.debug("sending command %s" % htd_client.utils.stringify_bytes(cmd))
         self._connection.send(cmd)
-
 
     def get_zone_count(self) -> int:
         """
