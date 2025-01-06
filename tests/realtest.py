@@ -3,11 +3,11 @@ import time
 
 from htd_client import BaseClient, get_client, HtdDeviceKind, get_model_info
 
-MCA66_IP = ""
+MCA66_TEST = ""
 LYNC_12_TEST = ""
 
 def reset_to_normal(power=True):
-    client = get_client(HtdDeviceKind.mca, MCA66_IP, 10006)
+    client = get_client(HtdDeviceKind.mca, MCA66_TEST, 10006)
 
     delay = 25 / 1000
     attempts_until_refresh = 20
@@ -57,11 +57,11 @@ def countdown(seconds):
         seconds -= 1
 
 def identify_test():
-    model_info = get_model_info(MCA66_IP)
+    model_info = get_model_info(MCA66_TEST)
     print(model_info)
     model_info = get_model_info(LYNC_12_TEST, 9001)
     print(model_info)
-    client_mca = get_client(HtdDeviceKind.mca, MCA66_IP, port=10006)
+    client_mca = get_client(HtdDeviceKind.mca, MCA66_TEST, port=10006)
     client_lync = get_client(HtdDeviceKind.lync, LYNC_12_TEST, 9001)
     # print(response)
 
@@ -74,7 +74,8 @@ def identify_test():
     # for i in range(zone_count):
     #     client.set_source(1 + i, 7)
 
-    countdown(1)
+    client_mca.wait_until_ready()
+    client_lync.wait_until_ready()
 
     def run_test(description: str, client: BaseClient):
         print("")
@@ -132,11 +133,11 @@ def identify_test():
 
 
 def device_test():
-    client = get_client(HtdDeviceKind.lync, MCA66_IP, 10006)
+    client = get_client(HtdDeviceKind.lync, MCA66_TEST, 10006)
     # client = get_client(HtdDeviceKind.lync, "69.76.150.235", 9001)
     if client._connected:
         print("Connected ")
-        while not client._is_ready:
+        while not client._ready:
             print(".", end='')
             time.sleep(.25)
 
