@@ -42,7 +42,7 @@ class BaseClient:
 
     _connected: bool = False
     _zones_loaded: int = 0
-    _is_ready: bool = False
+    _ready: bool = False
 
     _subscribers: set = None
     _loop: asyncio.AbstractEventLoop = None
@@ -78,13 +78,13 @@ class BaseClient:
         self._subscribers.add(callback)
 
         # if we're already ready, call the callback immediately and let them update
-        if self._is_ready:
-            callback()
+        if self._ready:
+            callback(None)
 
     def unsubscribe(self, callback):
         self._subscribers.discard(callback)
 
-    def _broadcast(self, zone: int):
+    def _broadcast(self, zone: int = None):
         while self._callback_lock.locked():
             pass
 
@@ -92,8 +92,13 @@ class BaseClient:
             for callback in self._subscribers:
                 callback(zone)
 
-    def is_ready(self):
-        return self._is_ready
+    @property
+    def connected(self):
+        return self._connected
+
+    @property
+    def ready(self):
+        return self._ready
 
     def connect(self):
         if self._connected:
@@ -104,11 +109,12 @@ class BaseClient:
         self._socket_thread.daemon = True
         self._socket_thread.start()
 
+    def wait_until_ready(self):
         start_time = time.time()
         current_time = time.time()
         refresh_count = 0
 
-        while not self._is_ready and current_time - start_time < self._socket_timeout_sec:
+        while not self._ready and current_time - start_time < self._socket_timeout_sec:
             current_time = time.time()
 
             if refresh_count * self._command_retry_timeout < int(current_time - start_time):
@@ -121,8 +127,6 @@ class BaseClient:
 
     def _connection_thread(self):
         # ensure we can connect, this will get set to True from an external thread
-        self.should_disconnect = False
-
         address = (self._ip_address, self._port)
 
         _LOGGER.info("connecting to %s:%s" % address)
@@ -134,7 +138,11 @@ class BaseClient:
 
         self._connected = True
 
+        self._broadcast()
+
         _LOGGER.info("connected")
+
+        self.should_disconnect = False
 
         while not self._should_disconnect:
             zone = None
@@ -151,10 +159,12 @@ class BaseClient:
                         (zone, chunk_length) = self._process_next_command(data)
                         data = data[chunk_length:]
 
+            except socket.timeout:
+                pass
+
             except Exception as e:
                 _LOGGER.error(f"Error processing data!")
                 _LOGGER.exception(e)
-                break
 
             self._loop.run_in_executor(None, self._broadcast, zone)
 
@@ -237,10 +247,10 @@ class BaseClient:
             frame = data[data_idx:data_idx + expected_length]
             self._parse_command(zone, command, frame)
 
-            if not self._is_ready and command == HtdCommonCommands.ZONE_STATUS_RECEIVE_COMMAND:
+            if not self._ready and command == HtdCommonCommands.ZONE_STATUS_RECEIVE_COMMAND:
                 self._zones_loaded += 1
                 if self._zones_loaded == self._model_info['zones']:
-                    self._is_ready = True
+                    self._ready = True
 
         else:
             _LOGGER.info("Bad checksum %02x != %02x", frame_sum_checksum, checksum)
@@ -425,6 +435,15 @@ class BaseClient:
             int: the number of zones available
         """
         return self._model_info['zones']
+
+    def get_source_count(self) -> int:
+        """
+        Get the number of sources available
+
+        Returns:
+            int: the number of sources available
+        """
+        return self._model_info['sources']
 
     def get_zone(self, zone: int):
         """

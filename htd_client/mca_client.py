@@ -22,18 +22,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class HtdMcaClient(BaseClient):
-    """
-    This is the client for the HTD gateway device. It can communicate with
-    the device and send instructions.
-
-    Args:
-        ip_address (str): ip address of the gateway to connect to
-        port (int): the port number of the gateway to connect to
-        retry_attempts(int): if a response is not valid or incorrect, how many times should we try again.
-        amount of time inbetween commands, in milliseconds
-        socket_timeout(int): the amount of time before we will time out from
-        the device, in milliseconds
-    """
+    _target_volumes: Dict[int, int | None] = None
 
     def __init__(
         self,
@@ -42,6 +31,18 @@ class HtdMcaClient(BaseClient):
         retry_attempts: int = HtdConstants.DEFAULT_RETRY_ATTEMPTS,
         socket_timeout: int = HtdConstants.DEFAULT_SOCKET_TIMEOUT
     ):
+        """
+        This is the client for the HTD gateway device. It can communicate with
+        the device and send instructions.
+
+        Args:
+            ip_address (str): ip address of the gateway to connect to
+            port (int): the port number of the gateway to connect to
+            retry_attempts(int): if a response is not valid or incorrect, how many times should we try again.
+            amount of time inbetween commands, in milliseconds
+            socket_timeout(int): the amount of time before we will time out from
+            the device, in milliseconds
+        """
         self._model_info = HtdConstants.SUPPORTED_MODELS["mca66"]
 
         # the mca does not support changing the volume directly to the target, therefore we record the target,
@@ -81,7 +82,8 @@ class HtdMcaClient(BaseClient):
 
         self._toggle_mute(zone)
 
-    _target_volumes: Dict[int, int | None] = None
+    def has_volume_target(self, zone: int):
+        return self._target_volumes[zone] is not None
 
     def set_volume(self, zone: int, volume: int):
         self._target_volumes[zone] = volume
@@ -175,7 +177,7 @@ class HtdMcaClient(BaseClient):
         # htd_client.utils.validate_source(source)
 
         return self._send_and_validate(
-            lambda z: z.source != source,
+            lambda z: z.source == source,
             zone,
             HtdMcaCommands.COMMON_COMMAND_CODE,
             HtdMcaConstants.SOURCE_COMMAND_OFFSET + source
@@ -281,7 +283,7 @@ class HtdMcaClient(BaseClient):
             return
 
         self._send_and_validate(
-            lambda z: z.bass == zone_info.bass + 1,
+            lambda z: z.bass >= zone_info.bass + 1,
             zone,
             HtdMcaCommands.COMMON_COMMAND_CODE,
             HtdMcaCommands.BASS_UP_COMMAND
@@ -302,7 +304,7 @@ class HtdMcaClient(BaseClient):
             return
 
         self._send_and_validate(
-            lambda z: z.bass == zone_info.bass - 1,
+            lambda z: z.bass <= zone_info.bass - 1,
             zone,
             HtdMcaCommands.COMMON_COMMAND_CODE,
             HtdMcaCommands.BASS_DOWN_COMMAND
@@ -323,7 +325,7 @@ class HtdMcaClient(BaseClient):
             return
 
         self._send_and_validate(
-            lambda z: z.treble == zone_info.treble + 1,
+            lambda z: z.treble >= zone_info.treble + 1,
             zone,
             HtdMcaCommands.COMMON_COMMAND_CODE,
             HtdMcaCommands.TREBLE_UP_COMMAND
@@ -344,7 +346,7 @@ class HtdMcaClient(BaseClient):
             return
 
         self._send_and_validate(
-            lambda z: z.treble == zone_info.treble - 1,
+            lambda z: z.treble <= zone_info.treble - 1,
             zone,
             HtdMcaCommands.COMMON_COMMAND_CODE,
             HtdMcaCommands.TREBLE_DOWN_COMMAND
@@ -365,7 +367,7 @@ class HtdMcaClient(BaseClient):
             return
 
         self._send_and_validate(
-            lambda z: z.balance == zone_info.balance - 1,
+            lambda z: z.balance <= zone_info.balance - 1,
             zone,
             HtdMcaCommands.COMMON_COMMAND_CODE,
             HtdMcaCommands.BALANCE_LEFT_COMMAND
@@ -386,7 +388,7 @@ class HtdMcaClient(BaseClient):
             return
 
         self._send_and_validate(
-            lambda z: z.balance == zone_info.balance + 1,
+            lambda z: z.balance >= zone_info.balance + 1,
             zone,
             HtdMcaCommands.COMMON_COMMAND_CODE,
             HtdMcaCommands.BALANCE_RIGHT_COMMAND
