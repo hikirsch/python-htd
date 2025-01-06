@@ -351,6 +351,8 @@ class BaseClient:
 
         zone = ZoneDetail(zone_number)
 
+        state_toggles = state_toggles[::-1]
+
         zone.power = htd_client.utils.is_bit_on(
             state_toggles,
             HtdConstants.POWER_STATE_TOGGLE_INDEX
