@@ -75,7 +75,7 @@ def send_command(
     ip_address: str,
     port: int,
 ) -> bytes | None:
-    connection = socket.create_connection(address=(ip_address, port))
+    connection = socket.create_connection(address=(ip_address, port), timeout=HtdConstants.DEFAULT_COMMAND_RETRY_TIMEOUT)
     connection.send(cmd)
     data = connection.recv(MAX_BYTES_TO_RECEIVE)
     connection.close()

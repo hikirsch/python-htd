@@ -74,24 +74,6 @@ class BaseClient:
 
         self.connect()
 
-    def subscribe(self, callback):
-        self._subscribers.add(callback)
-
-        # if we're already ready, call the callback immediately and let them update
-        if self._ready:
-            callback(None)
-
-    def unsubscribe(self, callback):
-        self._subscribers.discard(callback)
-
-    def _broadcast(self, zone: int = None):
-        while self._callback_lock.locked():
-            pass
-
-        with self._callback_lock:
-            for callback in self._subscribers:
-                callback(zone)
-
     @property
     def connected(self):
         return self._connected
@@ -101,10 +83,6 @@ class BaseClient:
         return self._ready
 
     def connect(self):
-        if self._connected:
-            _LOGGER.debug("Trying to connect but already connected")
-            return
-
         address = (self._ip_address, self._port)
 
         _LOGGER.debug("connecting to %s:%s" % address)
@@ -115,8 +93,6 @@ class BaseClient:
         )
 
         self.refresh()
-
-        self._connected = True
 
         _LOGGER.debug("connected")
 
@@ -136,6 +112,9 @@ class BaseClient:
                 refresh_count += 1
                 self.refresh()
 
+    def has_zone_data(self, zone: int):
+        return zone in self._zone_data
+
     def disconnect(self):
         self._should_disconnect = True
 
@@ -144,8 +123,6 @@ class BaseClient:
         self.should_disconnect = False
 
         while not self._should_disconnect:
-            zone = None
-
             try:
                 data = self._connection.recv(MAX_BYTES_TO_RECEIVE)
                 _LOGGER.debug("Received data %s" % htd_client.utils.stringify_bytes(data))
@@ -158,8 +135,7 @@ class BaseClient:
                         (zone, chunk_length) = self._process_next_command(data)
                         data = data[chunk_length:]
 
-                        if zone is not None and zone > 0:
-                            self._loop.run_in_executor(None, self._broadcast, zone)
+                        self._loop.run_in_executor(None, self._broadcast, zone)
 
             except socket.timeout:
                 pass
@@ -292,12 +268,12 @@ class BaseClient:
 
         elif cmd == HtdCommonCommands.ZONE_SOURCE_NAME_RECEIVE_COMMAND_MCA:
             zone_source_name = str(data[2:9].decode(errors="ignore").strip('\0')).lower()
-            print("ZONE SOURCE NAME NOT USED, zone %d, zone_source_name = %s" % (zone, zone_source_name))
+            # print("ZONE SOURCE NAME NOT USED, zone %d, zone_source_name = %s" % (zone, zone_source_name))
 
         elif cmd == HtdCommonCommands.ZONE_SOURCE_NAME_RECEIVE_COMMAND_LYNC:
-            # remove the extra null bytes
             zone_source_name = str(data[0:11].decode().rstrip('\0')).lower()
-            print("ZONE SOURCE NAME NOT USED, zone_source_name = %s" % zone_source_name)
+            # remove the extra null bytes
+            # print("ZONE SOURCE NAME NOT USED, zone_source_name = %s" % zone_source_name)
 
         elif cmd == HtdCommonCommands.ZONE_NAME_RECEIVE_COMMAND:
             name = str(data[0:11].decode().rstrip('\0')).lower()
@@ -306,7 +282,7 @@ class BaseClient:
         elif cmd == HtdCommonCommands.SOURCE_NAME_RECEIVE_COMMAND:
             source = data[11]
             name = str(data[0:10].decode().rstrip('\0')).lower()
-            print("GOT SOURCE NAME NOT USED, source = %s, name = %s" % (source, name))
+            # print("GOT SOURCE NAME NOT USED, source = %s, name = %s" % (source, name))
             # self.zone_info[zone]['source_list'][source] = name
             # self.source_info[zone][name] = source
         #
@@ -351,7 +327,8 @@ class BaseClient:
 
         zone = ZoneDetail(zone_number)
 
-        state_toggles = state_toggles[::-1]
+        if self._kind == HtdDeviceKind.lync:
+            state_toggles = state_toggles[::-1]
 
         zone.power = htd_client.utils.is_bit_on(
             state_toggles,
@@ -367,6 +344,24 @@ class BaseClient:
         zone.balance = htd_client.utils.convert_value(zone_data[HtdConstants.BALANCE_ZONE_DATA_INDEX])
 
         return zone
+
+    def subscribe(self, callback):
+        self._subscribers.add(callback)
+
+        # if we're already ready, call the callback immediately and let them update
+        if self._ready:
+            callback(None)
+
+    def unsubscribe(self, callback):
+        self._subscribers.discard(callback)
+
+    def _broadcast(self, zone: int = None):
+        while self._callback_lock.locked():
+            pass
+
+        with self._callback_lock:
+            for callback in self._subscribers:
+                callback(zone)
 
     def _send_and_validate(
         self,
@@ -396,7 +391,7 @@ class BaseClient:
         last_attempt_time = 0
 
         while not validate(self.get_zone(zone)):
-            if time.time() - last_attempt_time > self._command_retry_timeout:
+            if int(time.time() - last_attempt_time) > self._command_retry_timeout:
                 attempts += 1
 
                 if attempts > self._retry_attempts:
@@ -425,8 +420,17 @@ class BaseClient:
             pass
 
         cmd = htd_client.utils.build_command(zone, command, data_code, extra_data)
-        _LOGGER.debug("sending command %s" % htd_client.utils.stringify_bytes(cmd))
-        self._connection.send(cmd)
+
+        try:
+            _LOGGER.debug("sending command %s" % htd_client.utils.stringify_bytes(cmd))
+            self._connection.send(cmd)
+        except BrokenPipeError as e:
+            _LOGGER.error("Failed to send command, reconnecting and retrying")
+            self.connect()
+
+            _LOGGER.debug("Reconnected, retrying command")
+            self._connection.send(cmd)
+
 
     def get_zone_count(self) -> int:
         """
