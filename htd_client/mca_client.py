@@ -61,7 +61,7 @@ class HtdMcaClient(BaseClient):
         self.subscribe(self._on_zone_update)
 
     def _on_zone_update(self, zone: int = None):
-        if zone is None:
+        if zone is None or zone == 0:
             return
 
         if self._target_volumes[zone] is not None:
