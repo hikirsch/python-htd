@@ -132,7 +132,7 @@ class BaseClient:
 
         data = bytearray()
 
-        while not self._should_disconnect:
+        while not self._should_disconnect or self._connection.is_open:
             try:
                 data += self._connection.read_all()
 
@@ -159,7 +159,10 @@ class BaseClient:
                 _LOGGER.error(f"Error processing data!")
                 _LOGGER.exception(e)
 
-        _LOGGER.error("Disconnected!!")
+        # if we did not try to disconnect, reconnect
+        if not self._should_disconnect:
+            self.connect()
+
 
     def _process_next_command(self, data: bytes):
         """
