@@ -13,6 +13,7 @@
 """
 
 import logging
+from typing import Tuple
 
 import htd_client.utils
 from .base_client import BaseClient
@@ -23,29 +24,31 @@ from .mca_client import HtdMcaClient
 _LOGGER = logging.getLogger(__name__)
 
 
-def get_client(kind: HtdDeviceKind, ip_address: str, port: int) -> BaseClient:
+def get_client(network_address: Tuple[str, int] = None, serial_address: str = None) -> BaseClient:
     """
     Create a new client object.
 
     Args:
         kind (HtdDeviceKind): The type
-        ip_address (str): The IP address of the gateway.
-        port (int): The port number of the gateway.
+        network_address (str): The address to communicate with over TCP.
+        serial_address (str): The location of the serial port.
 
     Returns:
         HtdClient: The new client object.
     """
 
-    if kind == HtdDeviceKind.mca:
-        return HtdMcaClient(ip_address, port)
+    model_info = get_model_info(serial_address=serial_address, network_address=network_address)
 
-    elif kind == HtdDeviceKind.lync:
-        return HtdLyncClient(ip_address, port)
+    if model_info["kind"] == HtdDeviceKind.mca:
+        return HtdMcaClient(model_info, network_address=network_address, serial_address=serial_address)
 
-    raise ValueError(f"Unknown Device Kind: {kind}")
+    elif model_info["kind"] == HtdDeviceKind.lync:
+        return HtdLyncClient(model_info, network_address=network_address, serial_address=serial_address)
+
+    raise ValueError(f"Unknown Device Kind: {model_info["kind"]}")
 
 
-def get_model_info(ip_address: str, port: int = HtdConstants.DEFAULT_PORT) -> HtdModelInfo | None:
+def get_model_info(serial_address:str=None, network_address: Tuple[str, int] = None) -> HtdModelInfo | None:
     """
     Get the model information from the gateway.
 
@@ -58,7 +61,7 @@ def get_model_info(ip_address: str, port: int = HtdConstants.DEFAULT_PORT) -> Ht
         1, HtdCommonCommands.MODEL_QUERY_COMMAND_CODE, 0
     )
 
-    model_id = htd_client.utils.send_command(cmd, ip_address, port)
+    model_id = htd_client.utils.send_command(cmd, network_address=network_address, serial_address=serial_address)
 
     for model_name in HtdConstants.SUPPORTED_MODELS:
         model = HtdConstants.SUPPORTED_MODELS[model_name]

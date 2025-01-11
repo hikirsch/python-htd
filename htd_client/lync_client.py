@@ -13,10 +13,11 @@
 """
 
 import logging
+from typing import Tuple
 
 import htd_client.utils
 from .base_client import BaseClient
-from .constants import HtdConstants, HtdDeviceKind, HtdLyncCommands, HtdLyncConstants
+from .constants import HtdConstants, HtdLyncCommands, HtdLyncConstants, HtdModelInfo
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -35,17 +36,21 @@ class HtdLyncClient(BaseClient):
 
     def __init__(
         self,
-        ip_address: str,
-        port: int = HtdConstants.DEFAULT_PORT,
+        model_info: HtdModelInfo,
+        serial_address: str = None,
+        network_address: Tuple[str, int] = None,
+        command_retry_timeout: int = HtdConstants.DEFAULT_COMMAND_RETRY_TIMEOUT,
         retry_attempts: int = HtdConstants.DEFAULT_RETRY_ATTEMPTS,
         socket_timeout: int = HtdConstants.DEFAULT_SOCKET_TIMEOUT
     ):
+
         super().__init__(
-            HtdDeviceKind.lync,
-            ip_address,
-            port,
+            model_info,
+            serial_address,
+            network_address,
+            command_retry_timeout,
             retry_attempts,
-            socket_timeout
+            socket_timeout,
         )
 
     def set_volume(self, zone: int, volume: int):
