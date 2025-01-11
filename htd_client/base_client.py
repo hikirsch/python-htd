@@ -20,6 +20,7 @@ from abc import abstractmethod
 from typing import Dict, Tuple
 
 import serial
+from serial.serialutil import SerialException
 
 import htd_client
 from .constants import HtdConstants, HtdDeviceKind, ONE_SECOND, MAX_BYTES_TO_RECEIVE, HtdModelInfo, HtdCommonCommands
@@ -34,7 +35,6 @@ class BaseClient:
     _command_retry_timeout: int = None
     _retry_attempts: int = None
     _socket_timeout_sec: float = None
-    _buf: bytearray = None
     _zone_data: Dict[int, ZoneDetail] = None
     _model_info: HtdModelInfo = None
     _connection: serial = None
@@ -42,6 +42,7 @@ class BaseClient:
     _socket_lock: threading.Lock = None
 
     _zones_loaded: int = 0
+    _connected: bool = False
     _ready: bool = False
 
     _subscribers: set = None
@@ -62,20 +63,20 @@ class BaseClient:
         self._retry_attempts = retry_attempts
         self._socket_timeout_sec = socket_timeout / ONE_SECOND
         self._model_info = model_info
-        self._buf = bytearray()
         self._zone_data = {}
         self._subscribers = set()
         self._socket_lock = threading.Lock()
         self._callback_lock = threading.Lock()
         self._loop = asyncio.get_event_loop()
         self._serial_address = serial_address
+        self._connected = False
         self._should_disconnect = False
 
         self.connect()
 
     @property
     def connected(self):
-        return self._connection.is_open
+        return self._connected
 
     @property
     def ready(self):
@@ -97,8 +98,12 @@ class BaseClient:
 
             self._connection = serial.serial_for_url(
                 f"socket://{ip_address}:{port}",
-                timeout=self._socket_timeout_sec
+                timeout=self._socket_timeout_sec,
+                baudrate=38400
             )
+
+        self._connected = True
+        self._should_disconnect = False
 
         self.refresh()
 
@@ -127,19 +132,18 @@ class BaseClient:
         self._should_disconnect = True
 
     def _connection_thread(self):
-        # ensure we can connect, this will get set to True from an external thread
-        self.should_disconnect = False
-
         data = bytearray()
 
-        while not self._should_disconnect or self._connection.is_open:
+        while self.connected and not self._should_disconnect:
             try:
-                data += self._connection.read_all()
+                new_data = self._connection.read_all()
 
-                if len(data) == 0:
+                if len(new_data) == 0:
                     continue
 
-                _LOGGER.debug("Received data %s" % htd_client.utils.stringify_bytes(data))
+                data += new_data
+
+                _LOGGER.debug("Received new data %s" % htd_client.utils.stringify_bytes(data))
 
                 with self._socket_lock:
                     while len(data) > 0:
@@ -152,8 +156,8 @@ class BaseClient:
 
                         self._loop.run_in_executor(None, self._broadcast, zone)
 
-            except socket.timeout:
-                pass
+            except SerialException:
+                self._connected = False
 
             except Exception as e:
                 _LOGGER.error(f"Error processing data!")
