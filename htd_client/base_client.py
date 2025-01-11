@@ -17,7 +17,9 @@ import socket
 import threading
 import time
 from abc import abstractmethod
-from typing import Dict
+from typing import Dict, Tuple
+
+import serial
 
 import htd_client
 from .constants import HtdConstants, HtdDeviceKind, ONE_SECOND, MAX_BYTES_TO_RECEIVE, HtdModelInfo, HtdCommonCommands
@@ -27,20 +29,18 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class BaseClient:
-    _kind: HtdDeviceKind = None
-    _ip_address: str = None
-    _port: int = None
+    _network_address: Tuple[str, int] = None
+    _serial_address: str = None
     _command_retry_timeout: int = None
     _retry_attempts: int = None
     _socket_timeout_sec: float = None
     _buf: bytearray = None
     _zone_data: Dict[int, ZoneDetail] = None
     _model_info: HtdModelInfo = None
-    _connection: socket.socket = None
+    _connection: serial = None
     _socket_thread: threading.Thread = None
     _socket_lock: threading.Lock = None
 
-    _connected: bool = False
     _zones_loaded: int = 0
     _ready: bool = False
 
@@ -49,48 +49,56 @@ class BaseClient:
 
     def __init__(
         self,
-        kind: HtdDeviceKind,
-        ip_address: str,
-        port: int = HtdConstants.DEFAULT_PORT,
+        model_info: HtdModelInfo,
+        serial_address: str = None,
+        network_address: Tuple[str, int] = None,
         command_retry_timeout: int = HtdConstants.DEFAULT_COMMAND_RETRY_TIMEOUT,
         retry_attempts: int = HtdConstants.DEFAULT_RETRY_ATTEMPTS,
         socket_timeout: int = HtdConstants.DEFAULT_SOCKET_TIMEOUT
     ):
-        self._kind = kind
-        self._ip_address = ip_address
-        self._port = port
+
+        self._network_address = network_address
         self._command_retry_timeout = command_retry_timeout
         self._retry_attempts = retry_attempts
         self._socket_timeout_sec = socket_timeout / ONE_SECOND
+        self._model_info = model_info
         self._buf = bytearray()
         self._zone_data = {}
         self._subscribers = set()
         self._socket_lock = threading.Lock()
         self._callback_lock = threading.Lock()
         self._loop = asyncio.get_event_loop()
+        self._serial_address = serial_address
         self._should_disconnect = False
-        self._connected = False
-        self._model_info = htd_client.get_model_info(self._ip_address, self._port)
 
         self.connect()
 
     @property
     def connected(self):
-        return self._connected
+        return self._connection.is_open
 
     @property
     def ready(self):
         return self._ready
 
     def connect(self):
-        address = (self._ip_address, self._port)
+        if self._serial_address is not None:
+            self._connection = serial.Serial(
+                port=self._serial_address,
+                baudrate=38400,
+                parity=serial.PARITY_NONE,
+                stopbits=serial.STOPBITS_ONE,
+                bytesize=serial.EIGHTBITS,
+                timeout=self._socket_timeout_sec
+            )
 
-        _LOGGER.debug("connecting to %s:%s" % address)
+        elif self._network_address is not None:
+            ip_address, port = self._network_address
 
-        self._connection = socket.create_connection(
-            address=address,
-            timeout=self._socket_timeout_sec,
-        )
+            self._connection = serial.serial_for_url(
+                f"socket://{ip_address}:{port}",
+                timeout=self._socket_timeout_sec
+            )
 
         self.refresh()
 
@@ -122,17 +130,24 @@ class BaseClient:
         # ensure we can connect, this will get set to True from an external thread
         self.should_disconnect = False
 
+        data = bytearray()
+
         while not self._should_disconnect:
             try:
-                data = self._connection.recv(MAX_BYTES_TO_RECEIVE)
-                _LOGGER.debug("Received data %s" % htd_client.utils.stringify_bytes(data))
+                data += self._connection.read_all()
 
                 if len(data) == 0:
-                    break
+                    continue
+
+                _LOGGER.debug("Received data %s" % htd_client.utils.stringify_bytes(data))
 
                 with self._socket_lock:
                     while len(data) > 0:
                         (zone, chunk_length) = self._process_next_command(data)
+
+                        if chunk_length == 0:
+                            break
+
                         data = data[chunk_length:]
 
                         self._loop.run_in_executor(None, self._broadcast, zone)
@@ -144,7 +159,6 @@ class BaseClient:
                 _LOGGER.error(f"Error processing data!")
                 _LOGGER.exception(e)
 
-        self._connected = False
         _LOGGER.error("Disconnected!!")
 
     def _process_next_command(self, data: bytes):
@@ -204,7 +218,7 @@ class BaseClient:
             return start_message_index + HtdConstants.MESSAGE_HEADER_LENGTH
 
         # not enough data, wait for more
-        if len(data) < data_idx + expected_length:
+        if len(data) <= data_idx + expected_length:
             return None, 0
 
         end_message_index = start_message_index + HtdConstants.MESSAGE_HEADER_LENGTH + 2 + expected_length
@@ -327,7 +341,7 @@ class BaseClient:
 
         zone = ZoneDetail(zone_number)
 
-        if self._kind == HtdDeviceKind.lync:
+        if self._model_info["kind"] == HtdDeviceKind.lync:
             state_toggles = state_toggles[::-1]
 
         zone.power = htd_client.utils.is_bit_on(
@@ -423,14 +437,15 @@ class BaseClient:
 
         try:
             _LOGGER.debug("sending command %s" % htd_client.utils.stringify_bytes(cmd))
-            self._connection.send(cmd)
+            self._connection.write(cmd)
+            self._connection.flush()
         except BrokenPipeError as e:
             _LOGGER.error("Failed to send command, reconnecting and retrying")
             self.connect()
 
             _LOGGER.debug("Reconnected, retrying command")
-            self._connection.send(cmd)
-
+            self._connection.write(cmd)
+            self._connection.flush()
 
     def get_zone_count(self) -> int:
         """

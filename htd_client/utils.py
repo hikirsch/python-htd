@@ -1,7 +1,7 @@
 import logging
 import socket
-from typing import Literal
-
+from typing import Literal, Tuple
+import serial
 from .constants import HtdConstants, MAX_BYTES_TO_RECEIVE
 
 _LOGGER = logging.getLogger(__name__)
@@ -72,14 +72,30 @@ def stringify_bytes(data: bytes) -> str:
 
 def send_command(
     cmd: bytes,
-    ip_address: str,
-    port: int,
+    network_address: Tuple[str, int] = None,
+    serial_address: str = None
 ) -> bytes | None:
-    connection = socket.create_connection(address=(ip_address, port), timeout=HtdConstants.DEFAULT_COMMAND_RETRY_TIMEOUT)
-    connection.send(cmd)
-    data = connection.recv(MAX_BYTES_TO_RECEIVE)
-    connection.close()
-    return data
+    if network_address is not None:
+        ip_address, port = network_address
+        connection = socket.create_connection(
+            address=(ip_address, port),
+            timeout=HtdConstants.DEFAULT_COMMAND_RETRY_TIMEOUT
+        )
+        connection.send(cmd)
+        data = connection.recv(MAX_BYTES_TO_RECEIVE)
+        connection.close()
+        return data
+
+    if serial_address is not None:
+        s = serial.Serial(serial_address, 38400, timeout=1)
+        s.write(cmd)
+        data = s.read(MAX_BYTES_TO_RECEIVE)
+        s.close()
+        header_index = data.find(HtdConstants.MESSAGE_HEADER)
+        if header_index == -1:
+            return data
+
+        return data[0:header_index]
 
 
 def convert_value(value: int):

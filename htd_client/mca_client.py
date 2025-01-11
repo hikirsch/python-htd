@@ -12,10 +12,10 @@
     updated_zone_info = client.volume_up(1)
 """
 import logging
-from typing import Dict
+from typing import Dict, Tuple
 
 from .base_client import BaseClient
-from .constants import HtdConstants, HtdDeviceKind, HtdMcaCommands, HtdMcaConstants
+from .constants import HtdConstants, HtdDeviceKind, HtdMcaCommands, HtdMcaConstants, HtdModelInfo
 from .models import ZoneDetail
 
 _LOGGER = logging.getLogger(__name__)
@@ -26,8 +26,10 @@ class HtdMcaClient(BaseClient):
 
     def __init__(
         self,
-        ip_address: str,
-        port: int = HtdConstants.DEFAULT_PORT,
+        model_info: HtdModelInfo,
+        serial_address: str = None,
+        network_address: Tuple[str, int] = None,
+        command_retry_timeout: int = HtdConstants.DEFAULT_COMMAND_RETRY_TIMEOUT,
         retry_attempts: int = HtdConstants.DEFAULT_RETRY_ATTEMPTS,
         socket_timeout: int = HtdConstants.DEFAULT_SOCKET_TIMEOUT
     ):
@@ -36,27 +38,26 @@ class HtdMcaClient(BaseClient):
         the device and send instructions.
 
         Args:
-            ip_address (str): ip address of the gateway to connect to
-            port (int): the port number of the gateway to connect to
+            network_address (Tuple[str, int]): ip address of the gateway to connect to
+            serial_address (str): the port number of the gateway to connect to
             retry_attempts(int): if a response is not valid or incorrect, how many times should we try again.
             amount of time inbetween commands, in milliseconds
             socket_timeout(int): the amount of time before we will time out from
             the device, in milliseconds
         """
-        self._model_info = HtdConstants.SUPPORTED_MODELS["mca66"]
+        super().__init__(
+            model_info,
+            serial_address,
+            network_address,
+            command_retry_timeout,
+            retry_attempts,
+            socket_timeout,
+        )
 
         # the mca does not support changing the volume directly to the target, therefore we record the target,
         # and everytime we get a zone status update, we'll check to see if there is a new volume being targeted, if so
         # we'll re-run _set_volume to get to the target
         self._target_volumes = {key: None for key in range(1, self._model_info["sources"] + 1)}
-
-        super().__init__(
-            HtdDeviceKind.mca,
-            ip_address,
-            port,
-            retry_attempts,
-            socket_timeout
-        )
 
         self.subscribe(self._on_zone_update)
 
