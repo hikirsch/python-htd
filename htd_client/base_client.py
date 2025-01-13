@@ -13,66 +13,63 @@
 """
 import asyncio
 import logging
-import socket
 import threading
 import time
 from abc import abstractmethod
+from asyncio import Transport
 from typing import Dict, Tuple
 
 import serial
-from serial.serialutil import SerialException
+from serial_asyncio import create_serial_connection
 
 import htd_client
-from .constants import HtdConstants, HtdDeviceKind, ONE_SECOND, MAX_BYTES_TO_RECEIVE, HtdModelInfo, HtdCommonCommands
+from .constants import HtdConstants, HtdDeviceKind, ONE_SECOND, HtdModelInfo, HtdCommonCommands
 from .models import ZoneDetail
 
 _LOGGER = logging.getLogger(__name__)
 
 
-class BaseClient:
-    _network_address: Tuple[str, int] = None
+class BaseClient(asyncio.Protocol):
+    _loop: asyncio.AbstractEventLoop = None
+    _model_info: HtdModelInfo = None
     _serial_address: str = None
+    _network_address: Tuple[str, int] = None
     _command_retry_timeout: int = None
     _retry_attempts: int = None
     _socket_timeout_sec: float = None
-    _zone_data: Dict[int, ZoneDetail] = None
-    _model_info: HtdModelInfo = None
-    _connection: serial = None
-    _socket_thread: threading.Thread = None
-    _socket_lock: threading.Lock = None
 
+    _subscribers: set = None
+    _socket_lock: threading.Lock = None
+    _callback_lock: threading.Lock = None
+
+    _connection: Transport | None = None
+    _heartbeat_task: asyncio.Task = None
+    _buffer: bytearray | None = None
+    _zone_data: Dict[int, ZoneDetail] = None
     _zones_loaded: int = 0
     _connected: bool = False
     _ready: bool = False
 
-    _subscribers: set = None
-    _loop: asyncio.AbstractEventLoop = None
-
     def __init__(
         self,
+        loop: asyncio.AbstractEventLoop,
         model_info: HtdModelInfo,
         serial_address: str = None,
         network_address: Tuple[str, int] = None,
         command_retry_timeout: int = HtdConstants.DEFAULT_COMMAND_RETRY_TIMEOUT,
         retry_attempts: int = HtdConstants.DEFAULT_RETRY_ATTEMPTS,
-        socket_timeout: int = HtdConstants.DEFAULT_SOCKET_TIMEOUT
+        socket_timeout: int = HtdConstants.DEFAULT_SOCKET_TIMEOUT,
     ):
-
+        self._loop = loop
+        self._model_info = model_info
+        self._serial_address = serial_address
         self._network_address = network_address
         self._command_retry_timeout = command_retry_timeout
         self._retry_attempts = retry_attempts
         self._socket_timeout_sec = socket_timeout / ONE_SECOND
-        self._model_info = model_info
-        self._zone_data = {}
         self._subscribers = set()
         self._socket_lock = threading.Lock()
         self._callback_lock = threading.Lock()
-        self._loop = asyncio.get_event_loop()
-        self._serial_address = serial_address
-        self._connected = False
-        self._should_disconnect = False
-
-        self.connect()
 
     @property
     def connected(self):
@@ -82,10 +79,25 @@ class BaseClient:
     def ready(self):
         return self._ready
 
-    def connect(self):
+    @property
+    def model(self):
+        return self._model_info
+
+    async def async_connect(self):
+        if self._connected:
+            return
+
+        self._buffer = bytearray()
+        self._zone_data = {}
+        self._zones_loaded = 0
+        self._zone_data = {}
+        self._connection = None
+
         if self._serial_address is not None:
-            self._connection = serial.Serial(
-                port=self._serial_address,
+            await create_serial_connection(
+                self._loop,
+                lambda: self,
+                self._serial_address,
                 baudrate=38400,
                 parity=serial.PARITY_NONE,
                 stopbits=serial.STOPBITS_ONE,
@@ -94,78 +106,82 @@ class BaseClient:
             )
 
         elif self._network_address is not None:
-            ip_address, port = self._network_address
+            host, port = self._network_address
+            await self._loop.create_connection(lambda: self, host, port)
 
-            self._connection = serial.serial_for_url(
-                f"socket://{ip_address}:{port}",
-                timeout=self._socket_timeout_sec,
-                baudrate=38400
-            )
+        else:
+            raise "No address provided"
 
-        self._connected = True
-        self._should_disconnect = False
-
-        self.refresh()
-
+    def connection_made(self, transport: Transport):
         _LOGGER.debug("connected")
+        self._connected = True
+        self._connection = transport
+        self._heartbeat_task = asyncio.create_task(self._heartbeat())
 
-        self._socket_thread = threading.Thread(target=self._connection_thread)
-        self._socket_thread.daemon = True
-        self._socket_thread.start()
 
-    def wait_until_ready(self):
-        start_time = time.time()
-        current_time = time.time()
-        refresh_count = 0
+    async def _heartbeat(self):
+        while self._connected:
+            print("refreshing")
+            self.refresh()
+            print("refreshed.")
+            print("sleeping 5")
+            await asyncio.sleep(5)
 
-        while not self._ready and current_time - start_time < self._socket_timeout_sec:
-            current_time = time.time()
 
-            if refresh_count * self._command_retry_timeout < int(current_time - start_time):
-                refresh_count += 1
-                self.refresh()
+    def data_received(self, new_data):
+        try:
+            if self._buffer is None:
+                self._buffer = bytearray()
+
+            self._buffer += new_data
+
+            _LOGGER.debug("Received new data %s" % htd_client.utils.stringify_bytes(new_data))
+
+            with self._socket_lock:
+                while len(self._buffer) > 0:
+                    (zone, chunk_length) = self._process_next_command(self._buffer)
+
+                    if chunk_length == 0:
+                        return
+
+                    self._buffer = self._buffer[chunk_length:]
+
+                    self._loop.run_in_executor(None, self._broadcast, zone)
+
+        except Exception as e:
+            _LOGGER.error(f"Error processing data!")
+            _LOGGER.exception(e)
+
+
+    def connection_lost(self, exc):
+        _LOGGER.info("Connection has been disconnected!")
+        self._ready = False
+        self._connected = False
+        self._buffer = None
+        self._heartbeat_task.cancel()
+
+        asyncio.create_task(self.async_connect())
+
+
+    async def async_wait_until_ready(self):
+        pass
+    #     start_time = time.time()
+    #     current_time = time.time()
+    #     refresh_count = 0
+    #
+    #     while not self._ready and current_time - start_time < self._socket_timeout_sec:
+    #         current_time = time.time()
+    #
+    #         if refresh_count * self._command_retry_timeout < int(current_time - start_time):
+    #             refresh_count += 1
+    #             self.refresh()
 
     def has_zone_data(self, zone: int):
         return zone in self._zone_data
 
+
     def disconnect(self):
-        self._should_disconnect = True
-
-    def _connection_thread(self):
-        data = bytearray()
-
-        while self.connected and not self._should_disconnect:
-            try:
-                new_data = self._connection.read_all()
-
-                if len(new_data) == 0:
-                    continue
-
-                data += new_data
-
-                _LOGGER.debug("Received new data %s" % htd_client.utils.stringify_bytes(data))
-
-                with self._socket_lock:
-                    while len(data) > 0:
-                        (zone, chunk_length) = self._process_next_command(data)
-
-                        if chunk_length == 0:
-                            break
-
-                        data = data[chunk_length:]
-
-                        self._loop.run_in_executor(None, self._broadcast, zone)
-
-            except SerialException:
-                self._connected = False
-
-            except Exception as e:
-                _LOGGER.error(f"Error processing data!")
-                _LOGGER.exception(e)
-
-        # if we did not try to disconnect, reconnect
-        if not self._should_disconnect:
-            self.connect()
+        self._connection.close()
 
 
     def _process_next_command(self, data: bytes):
@@ -256,16 +272,17 @@ class BaseClient:
 
     def _parse_command(self, zone, cmd, data):
         if cmd == HtdCommonCommands.KEYPAD_EXISTS_RECEIVE_COMMAND:
-            # this is zone 0 with all zone data
-            # second byte is zone 1 - 8
-            for i in range(8):
-                enabled = data[1] & (1 << i) > 0
-                self._zone_data[i + 1] = ZoneDetail(i + 1, enabled)
+            if len(self._zone_data) == 0:
+                # this is zone 0 with all zone data
+                # second byte is zone 1 - 8
+                for i in range(8):
+                    enabled = data[1] & (1 << i) > 0
+                    self._zone_data[i + 1] = ZoneDetail(i + 1, enabled)
 
-            # fourth byte is zone 9 - 16
-            for i in range(8):
-                enabled = data[3] & (1 << i) > 0
-                self._zone_data[i + 9] = ZoneDetail(i + 9, enabled)
+                # fourth byte is zone 9 - 16
+                for i in range(8):
+                    enabled = data[3] & (1 << i) > 0
+                    self._zone_data[i + 9] = ZoneDetail(i + 9, enabled)
 
             # third byte is keypad 1 - 8
             # for i in range(8):
@@ -289,12 +306,10 @@ class BaseClient:
 
         elif cmd == HtdCommonCommands.ZONE_SOURCE_NAME_RECEIVE_COMMAND_MCA:
             zone_source_name = str(data[2:9].decode(errors="ignore").strip('\0')).lower()
-            # print("ZONE SOURCE NAME NOT USED, zone %d, zone_source_name = %s" % (zone, zone_source_name))
 
         elif cmd == HtdCommonCommands.ZONE_SOURCE_NAME_RECEIVE_COMMAND_LYNC:
             zone_source_name = str(data[0:11].decode().rstrip('\0')).lower()
             # remove the extra null bytes
-            # print("ZONE SOURCE NAME NOT USED, zone_source_name = %s" % zone_source_name)
 
         elif cmd == HtdCommonCommands.ZONE_NAME_RECEIVE_COMMAND:
             name = str(data[0:11].decode().rstrip('\0')).lower()
@@ -303,7 +318,6 @@ class BaseClient:
         elif cmd == HtdCommonCommands.SOURCE_NAME_RECEIVE_COMMAND:
             source = data[11]
             name = str(data[0:10].decode().rstrip('\0')).lower()
-            # print("GOT SOURCE NAME NOT USED, source = %s, name = %s" % (source, name))
             # self.zone_info[zone]['source_list'][source] = name
             # self.source_info[zone][name] = source
         #
@@ -366,20 +380,18 @@ class BaseClient:
 
         return zone
 
-    def subscribe(self, callback):
-        self._subscribers.add(callback)
+    async def async_subscribe(self, callback):
+        with self._callback_lock:
+            self._subscribers.add(callback)
+            # if we're already ready, call the callback immediately and let them update
+            if self._ready:
+                callback(None)
 
-        # if we're already ready, call the callback immediately and let them update
-        if self._ready:
-            callback(None)
-
-    def unsubscribe(self, callback):
-        self._subscribers.discard(callback)
+    async def async_unsubscribe(self, callback):
+        with self._callback_lock:
+            self._subscribers.discard(callback)
 
     def _broadcast(self, zone: int = None):
-        while self._callback_lock.locked():
-            pass
-
         with self._callback_lock:
             for callback in self._subscribers:
                 callback(zone)
@@ -391,7 +403,7 @@ class BaseClient:
         command: int,
         data_code: int,
         extra_data: bytearray = None,
-        follow_up=None
+        follow_up = None
     ):
         """
         Send a command to the gateway and parse the response.
@@ -437,22 +449,24 @@ class BaseClient:
         data_code: int,
         extra_data: bytearray = None
     ):
-        while self._socket_lock.locked():
-            pass
 
         cmd = htd_client.utils.build_command(zone, command, data_code, extra_data)
 
-        try:
-            _LOGGER.debug("sending command %s" % htd_client.utils.stringify_bytes(cmd))
-            self._connection.write(cmd)
-            self._connection.flush()
-        except BrokenPipeError as e:
-            _LOGGER.error("Failed to send command, reconnecting and retrying")
-            self.connect()
+        _LOGGER.debug("sending command %s" % htd_client.utils.stringify_bytes(cmd))
 
-            _LOGGER.debug("Reconnected, retrying command")
+        with self._socket_lock:
             self._connection.write(cmd)
-            self._connection.flush()
+
+                # self._connection.flush()
+        # try:
+        # except BrokenPipeError as e:
+        #     _LOGGER.error("Failed to send command, reconnecting and retrying")
+        #     self.async_connect()
+        #
+        #     _LOGGER.debug("Reconnected, retrying command")
+        #     with self._socket_lock:
+        #         self._connection.write(cmd)
+        #         # self._connection.flush()
 
     def get_zone_count(self) -> int:
         """

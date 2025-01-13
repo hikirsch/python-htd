@@ -11,7 +11,7 @@
     zone_info = client.query_zone(1)
     updated_zone_info = client.volume_up(1)
 """
-
+import asyncio
 import logging
 from typing import Tuple
 
@@ -28,29 +28,31 @@ class HtdLyncClient(BaseClient):
     the device and send instructions.
 
     Args:
-        ip_address (str): ip address of the gateway to connect to
-        port (int): the port number of the gateway to connect to
+        model_info (HtdModelInfo): the model info of the device
+        address (str): ip address of the gateway to connect to
         retry_attempts(int): if a response is not valid or incorrect,
         socket_timeout(int): the amount of time before we will time out from the device, in milliseconds
     """
 
     def __init__(
         self,
+        loop: asyncio.AbstractEventLoop,
         model_info: HtdModelInfo,
         serial_address: str = None,
         network_address: Tuple[str, int] = None,
         command_retry_timeout: int = HtdConstants.DEFAULT_COMMAND_RETRY_TIMEOUT,
         retry_attempts: int = HtdConstants.DEFAULT_RETRY_ATTEMPTS,
-        socket_timeout: int = HtdConstants.DEFAULT_SOCKET_TIMEOUT
+        socket_timeout: int = HtdConstants.DEFAULT_SOCKET_TIMEOUT,
     ):
 
         super().__init__(
+            loop,
             model_info,
-            serial_address,
-            network_address,
-            command_retry_timeout,
-            retry_attempts,
-            socket_timeout,
+            serial_address=serial_address,
+            network_address=network_address,
+            command_retry_timeout=command_retry_timeout,
+            retry_attempts=retry_attempts,
+            socket_timeout=socket_timeout,
         )
 
     def set_volume(self, zone: int, volume: int):
@@ -80,7 +82,6 @@ class HtdLyncClient(BaseClient):
         Args:
             zone (int): the zone to refresh, or None to refresh all zones
         """
-
         self._send_cmd(
             zone if zone is not None else 0,
             HtdLyncCommands.QUERY_COMMAND_CODE,

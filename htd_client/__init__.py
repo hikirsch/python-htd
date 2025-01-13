@@ -11,7 +11,7 @@
     zone_info = client.query_zone(1)
     updated_zone_info = client.volume_up(1)
 """
-
+import asyncio
 import logging
 from typing import Tuple
 
@@ -24,31 +24,58 @@ from .mca_client import HtdMcaClient
 _LOGGER = logging.getLogger(__name__)
 
 
-def get_client(network_address: Tuple[str, int] = None, serial_address: str = None) -> BaseClient:
+async def async_get_client(
+    serial_address: str = None,
+    network_address: Tuple[str, int] = None,
+    loop: asyncio.AbstractEventLoop = None,
+) -> BaseClient:
     """
     Create a new client object.
 
     Args:
-        kind (HtdDeviceKind): The type
         network_address (str): The address to communicate with over TCP.
         serial_address (str): The location of the serial port.
+        loop (asyncio.AbstractEventLoop): The event loop to use.
 
     Returns:
         HtdClient: The new client object.
     """
 
-    model_info = get_model_info(serial_address=serial_address, network_address=network_address)
+    model_info = await async_get_model_info(
+        loop if loop is not None else asyncio.get_event_loop(),
+        network_address=network_address,
+        serial_address=serial_address
+    )
 
     if model_info["kind"] == HtdDeviceKind.mca:
-        return HtdMcaClient(model_info, network_address=network_address, serial_address=serial_address)
+        client = HtdMcaClient(
+            loop if loop is not None else asyncio.get_event_loop(),
+            model_info,
+            network_address=network_address,
+            serial_address=serial_address,
+        )
 
     elif model_info["kind"] == HtdDeviceKind.lync:
-        return HtdLyncClient(model_info, network_address=network_address, serial_address=serial_address)
+        client = HtdLyncClient(
+            loop if loop is not None else asyncio.get_event_loop(),
+            model_info,
+            network_address=network_address,
+            serial_address=serial_address,
+        )
 
-    raise ValueError(f"Unknown Device Kind: {model_info["kind"]}")
+    else:
+        raise ValueError(f"Unknown Device Kind: {model_info["kind"]}")
+
+    await client.async_connect()
+
+    return client
 
 
-def get_model_info(serial_address:str=None, network_address: Tuple[str, int] = None) -> HtdModelInfo | None:
+async def async_get_model_info(
+    loop: asyncio.AbstractEventLoop = None,
+    network_address: Tuple[str, int] = None,
+    serial_address:str=None,
+) -> HtdModelInfo | None:
     """
     Get the model information from the gateway.
 
@@ -61,7 +88,12 @@ def get_model_info(serial_address:str=None, network_address: Tuple[str, int] = N
         1, HtdCommonCommands.MODEL_QUERY_COMMAND_CODE, 0
     )
 
-    model_id = htd_client.utils.send_command(cmd, network_address=network_address, serial_address=serial_address)
+    model_id = await htd_client.utils.async_send_command(
+        loop if loop is not None else asyncio.get_event_loop(),
+        cmd,
+        network_address=network_address,
+        serial_address=serial_address
+    )
 
     for model_name in HtdConstants.SUPPORTED_MODELS:
         model = HtdConstants.SUPPORTED_MODELS[model_name]
