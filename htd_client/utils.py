@@ -1,7 +1,9 @@
+import asyncio
 import logging
-import socket
 from typing import Literal, Tuple
-import serial
+
+from serial_asyncio import open_serial_connection
+
 from .constants import HtdConstants, MAX_BYTES_TO_RECEIVE
 
 _LOGGER = logging.getLogger(__name__)
@@ -70,32 +72,38 @@ def stringify_bytes(data: bytes) -> str:
     return ret_val
 
 
-def send_command(
+async def async_send_command(
+    loop: asyncio.AbstractEventLoop,
     cmd: bytes,
     network_address: Tuple[str, int] = None,
     serial_address: str = None
 ) -> bytes | None:
-    if network_address is not None:
-        ip_address, port = network_address
-        connection = socket.create_connection(
-            address=(ip_address, port),
+    if serial_address is not None:
+        reader, writer = await open_serial_connection(
+            loop=loop,
+            url=serial_address,
+            baudrate=38400,
             timeout=HtdConstants.DEFAULT_COMMAND_RETRY_TIMEOUT
         )
-        connection.send(cmd)
-        data = connection.recv(MAX_BYTES_TO_RECEIVE)
-        connection.close()
+
+    elif network_address is not None:
+        host, port = network_address
+        reader, writer = await asyncio.open_connection(host, port)
+
+    else:
+        raise "unable to connect, no address"
+
+    writer.write(cmd)
+    await writer.drain()
+    data = await reader.read(MAX_BYTES_TO_RECEIVE)
+    writer.close()
+    await writer.wait_closed()
+
+    header_index = data.find(HtdConstants.MESSAGE_HEADER)
+    if header_index == -1:
         return data
 
-    if serial_address is not None:
-        s = serial.Serial(serial_address, 38400, timeout=1)
-        s.write(cmd)
-        data = s.read(MAX_BYTES_TO_RECEIVE)
-        s.close()
-        header_index = data.find(HtdConstants.MESSAGE_HEADER)
-        if header_index == -1:
-            return data
-
-        return data[0:header_index]
+    return data[0:header_index]
 
 
 def convert_value(value: int):

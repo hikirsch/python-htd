@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "htd-client"
-version = "0.0.12"
+version = "0.0.13"
 description = "A client supporting Home Theater Direct's gateway device."
 authors = [
     "Adam Kirschner <accounts@adamskirschner.com>"
@@ -15,7 +15,7 @@ packages = [{include = "htd_client"}]
 
 [tool.poetry.dependencies]
 python = "^3.13"
-pyserial = "^3.5"
+pyserial-asyncio = "^0.6"
 
 [build-system]
 requires = ["poetry-core"]

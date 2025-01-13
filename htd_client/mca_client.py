@@ -11,11 +11,12 @@
     zone_info = client.query_zone(1)
     updated_zone_info = client.volume_up(1)
 """
+import asyncio
 import logging
 from typing import Dict, Tuple
 
 from .base_client import BaseClient
-from .constants import HtdConstants, HtdDeviceKind, HtdMcaCommands, HtdMcaConstants, HtdModelInfo
+from .constants import HtdConstants, HtdMcaCommands, HtdMcaConstants, HtdModelInfo
 from .models import ZoneDetail
 
 _LOGGER = logging.getLogger(__name__)
@@ -23,21 +24,25 @@ _LOGGER = logging.getLogger(__name__)
 
 class HtdMcaClient(BaseClient):
     _target_volumes: Dict[int, int | None] = None
+    _subscribed: bool = None
 
     def __init__(
         self,
+        loop: asyncio.AbstractEventLoop,
         model_info: HtdModelInfo,
-        serial_address: str = None,
         network_address: Tuple[str, int] = None,
+        serial_address: str = None,
         command_retry_timeout: int = HtdConstants.DEFAULT_COMMAND_RETRY_TIMEOUT,
         retry_attempts: int = HtdConstants.DEFAULT_RETRY_ATTEMPTS,
-        socket_timeout: int = HtdConstants.DEFAULT_SOCKET_TIMEOUT
+        socket_timeout: int = HtdConstants.DEFAULT_SOCKET_TIMEOUT,
     ):
         """
         This is the client for the HTD gateway device. It can communicate with
         the device and send instructions.
 
         Args:
+            loop (asyncio.AbstractEventLoop): The event loop to use
+            model_info (HtdModelInfo): the model information of the device
             network_address (Tuple[str, int]): ip address of the gateway to connect to
             serial_address (str): the port number of the gateway to connect to
             retry_attempts(int): if a response is not valid or incorrect, how many times should we try again.
@@ -46,20 +51,29 @@ class HtdMcaClient(BaseClient):
             the device, in milliseconds
         """
         super().__init__(
+            loop,
             model_info,
-            serial_address,
-            network_address,
-            command_retry_timeout,
-            retry_attempts,
-            socket_timeout,
+            serial_address=serial_address,
+            network_address=network_address,
+            command_retry_timeout=command_retry_timeout,
+            retry_attempts=retry_attempts,
+            socket_timeout=socket_timeout,
         )
 
         # the mca does not support changing the volume directly to the target, therefore we record the target,
         # and everytime we get a zone status update, we'll check to see if there is a new volume being targeted, if so
         # we'll re-run _set_volume to get to the target
+        self._subscribed = False
         self._target_volumes = {key: None for key in range(1, self._model_info["sources"] + 1)}
 
-        self.subscribe(self._on_zone_update)
+
+    async def async_connect(self):
+        if not self._subscribed:
+            await self.async_subscribe(self._on_zone_update)
+            self._subscribed = True
+
+        await super().async_connect()
+
 
     def _on_zone_update(self, zone: int = None):
         if zone is None or zone == 0:
