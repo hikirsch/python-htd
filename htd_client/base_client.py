@@ -121,11 +121,8 @@ class BaseClient(asyncio.Protocol):
 
     async def _heartbeat(self):
         while self._connected:
-            print("refreshing")
             self.refresh()
-            print("refreshed.")
-            print("sleeping 5")
-            await asyncio.sleep(5)
+            await asyncio.sleep(60)
 
 
     def data_received(self, new_data):
