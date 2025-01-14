@@ -14,7 +14,6 @@
 import asyncio
 import logging
 import threading
-import time
 from abc import abstractmethod
 from asyncio import Transport
 from typing import Dict, Tuple
@@ -269,17 +268,21 @@ class BaseClient(asyncio.Protocol):
 
     def _parse_command(self, zone, cmd, data):
         if cmd == HtdCommonCommands.KEYPAD_EXISTS_RECEIVE_COMMAND:
-            if len(self._zone_data) == 0:
-                # this is zone 0 with all zone data
-                # second byte is zone 1 - 8
-                for i in range(8):
-                    enabled = data[1] & (1 << i) > 0
-                    self._zone_data[i + 1] = ZoneDetail(i + 1, enabled)
+            # if len(self._zone_data) == 0:
+            # this is zone 0 with all zone data
+            # second byte is zone 1 - 8
+            for i in range(8):
+                enabled = data[1] & (1 << i) > 0
+                zone_info = ZoneDetail(i + 1) if i + 1 not in self._zone_data else self._zone_data[i + 1]
+                zone_info.enabled = enabled
+                self._zone_data[i + 1] = zone_info
 
-                # fourth byte is zone 9 - 16
-                for i in range(8):
-                    enabled = data[3] & (1 << i) > 0
-                    self._zone_data[i + 9] = ZoneDetail(i + 9, enabled)
+            # fourth byte is zone 9 - 16
+            for i in range(8):
+                enabled = data[3] & (1 << i) > 0
+                zone_info = ZoneDetail(i + 1) if i + 1 not in self._zone_data else self._zone_data[i + 1]
+                zone_info.enabled = enabled
+                self._zone_data[i + 9] = ZoneDetail(i + 9, enabled)
 
             # third byte is keypad 1 - 8
             # for i in range(8):
@@ -393,7 +396,7 @@ class BaseClient(asyncio.Protocol):
             for callback in self._subscribers:
                 callback(zone)
 
-    def _send_and_validate(
+    async def _async_send_and_validate(
         self,
         validate: callable,
         zone: int,
@@ -418,26 +421,25 @@ class BaseClient(asyncio.Protocol):
         """
 
         attempts = 0
-        last_attempt_time = 0
 
         while not validate(self.get_zone(zone)):
-            if int(time.time() - last_attempt_time) > self._command_retry_timeout:
-                attempts += 1
+            attempts += 1
 
-                if attempts > self._retry_attempts:
-                    raise Exception(f"Failed to execute command after {self._retry_attempts} attempts")
+            if attempts > self._retry_attempts:
+                raise Exception(f"Failed to execute command after {self._retry_attempts} attempts")
 
-                # we only want to call refresh if we have already tried
-                if last_attempt_time != 0:
-                    self.refresh(zone)
+            # we only want to call refresh if we have already tried
+            if attempts > 1:
+                self.refresh(zone)
 
-                self._send_cmd(zone, command, data_code, extra_data)
+            self._send_cmd(zone, command, data_code, extra_data)
 
-                # setting volume on lync requires you to unmute, so a followup command is used
-                if follow_up is not None:
-                    self._send_cmd(zone, follow_up[0], follow_up[1])
+            # setting volume on lync requires you to unmute, so a followup command is used
+            if follow_up is not None:
+                self._send_cmd(zone, follow_up[0], follow_up[1])
 
-                last_attempt_time = time.time()
+            await asyncio.sleep(self._command_retry_timeout)
+
 
     def _send_cmd(
         self,
@@ -498,7 +500,7 @@ class BaseClient(asyncio.Protocol):
         """
         return self._zone_data[zone]
 
-    def toggle_mute(self, zone: int):
+    def async_toggle_mute(self, zone: int):
         """
         Toggle the mute state of a zone.
 
@@ -508,9 +510,9 @@ class BaseClient(asyncio.Protocol):
         zone_detail = self.get_zone(zone)
 
         if zone_detail.mute:
-            self.unmute(zone)
+            self.async_unmute(zone)
         else:
-            self.mute(zone)
+            self.async_mute(zone)
 
     @abstractmethod
     def refresh(self, zone: int = None):
@@ -525,57 +527,57 @@ class BaseClient(asyncio.Protocol):
         pass
 
     @abstractmethod
-    def set_source(self, zone: int, source: int):
+    def async_set_source(self, zone: int, source: int):
         pass
 
     @abstractmethod
-    def volume_up(self, zone: int):
+    def async_volume_up(self, zone: int):
         pass
 
     @abstractmethod
-    def set_volume(self, zone: int, volume: int):
+    def async_set_volume(self, zone: int, volume: int):
         pass
 
     @abstractmethod
-    def volume_down(self, zone: int):
+    def async_volume_down(self, zone: int):
         pass
 
     @abstractmethod
-    def mute(self, zone: int):
+    def async_mute(self, zone: int):
         pass
 
     @abstractmethod
-    def unmute(self, zone: int):
+    def async_unmute(self, zone: int):
         pass
 
     @abstractmethod
-    def power_on(self, zone: int):
+    def async_power_on(self, zone: int):
         pass
 
     @abstractmethod
-    def power_off(self, zone: int):
+    def async_power_off(self, zone: int):
         pass
 
     @abstractmethod
-    def bass_up(self, zone: int):
+    def async_bass_up(self, zone: int):
         pass
 
     @abstractmethod
-    def bass_down(self, zone: int):
+    def async_bass_down(self, zone: int):
         pass
 
     @abstractmethod
-    def treble_up(self, zone: int):
+    def async_treble_up(self, zone: int):
         pass
 
     @abstractmethod
-    def treble_down(self, zone: int):
+    def async_treble_down(self, zone: int):
         pass
 
     @abstractmethod
-    def balance_left(self, zone: int):
+    def async_balance_left(self, zone: int):
         pass
 
     @abstractmethod
-    def balance_right(self, zone: int):
+    def async_balance_right(self, zone: int):
         pass

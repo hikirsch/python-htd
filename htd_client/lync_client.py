@@ -29,7 +29,8 @@ class HtdLyncClient(BaseClient):
 
     Args:
         model_info (HtdModelInfo): the model info of the device
-        address (str): ip address of the gateway to connect to
+        serial_address (str): serial address of the gateway
+        network_address (Tuple[str, int]): ip address and port of the gateway
         retry_attempts(int): if a response is not valid or incorrect,
         socket_timeout(int): the amount of time before we will time out from the device, in milliseconds
     """
@@ -55,7 +56,7 @@ class HtdLyncClient(BaseClient):
             socket_timeout=socket_timeout,
         )
 
-    def set_volume(self, zone: int, volume: int):
+    async def async_set_volume(self, zone: int, volume: int):
         """
         Set the volume of a zone.
 
@@ -66,7 +67,7 @@ class HtdLyncClient(BaseClient):
 
         volume_raw = htd_client.utils.convert_volume_to_raw(volume)
 
-        self._send_and_validate(
+        await self._async_send_and_validate(
             lambda z: z.volume == volume,
             zone,
             HtdLyncCommands.VOLUME_SETTING_CONTROL_COMMAND_CODE,
@@ -110,7 +111,7 @@ class HtdLyncClient(BaseClient):
             HtdLyncCommands.POWER_OFF_ALL_ZONES_COMMAND_CODE
         )
 
-    def set_source(self, zone: int, source: int):
+    async def async_set_source(self, zone: int, source: int):
         """
         Set the source of a zone.
 
@@ -119,14 +120,14 @@ class HtdLyncClient(BaseClient):
             source (int): the source to set
         """
 
-        return self._send_and_validate(
+        return await self._async_send_and_validate(
             lambda z: z.source == source,
             zone,
             HtdLyncCommands.COMMON_COMMAND_CODE,
             HtdLyncConstants.SOURCE_COMMAND_OFFSET + source
         )
 
-    def volume_up(self, zone: int):
+    async def async_volume_up(self, zone: int):
         """
         Increase the volume of a zone.
 
@@ -141,9 +142,9 @@ class HtdLyncClient(BaseClient):
         if new_volume > HtdConstants.MAX_RAW_VOLUME:
             return
 
-        self.set_volume(zone, new_volume)
+        await self.async_set_volume(zone, new_volume)
 
-    def volume_down(self, zone: int):
+    async def async_volume_down(self, zone: int):
         """
         Decrease the volume of a zone.
 
@@ -158,9 +159,9 @@ class HtdLyncClient(BaseClient):
         if new_volume < 0:
             return
 
-        self.set_volume(zone, new_volume)
+        await self.async_set_volume(zone, new_volume)
 
-    def mute(self, zone: int):
+    async def async_mute(self, zone: int):
         """
         Toggle the mute state of a zone.
 
@@ -168,14 +169,14 @@ class HtdLyncClient(BaseClient):
             zone (int): the zone
         """
 
-        self._send_and_validate(
+        await self._async_send_and_validate(
             lambda z: z.mute,
             zone,
             HtdLyncCommands.COMMON_COMMAND_CODE,
             HtdLyncCommands.MUTE_ON_COMMAND_CODE
         )
 
-    def unmute(self, zone: int):
+    async def async_unmute(self, zone: int):
         """
         Unmute this zone.
 
@@ -183,14 +184,14 @@ class HtdLyncClient(BaseClient):
             zone (int): the zone
         """
 
-        self._send_and_validate(
+        await self._async_send_and_validate(
             lambda z: not z.mute,
             zone,
             HtdLyncCommands.COMMON_COMMAND_CODE,
             HtdLyncCommands.MUTE_OFF_COMMAND_CODE
         )
 
-    def power_on(self, zone: int):
+    async def async_power_on(self, zone: int):
         """
         Power on a zone.
 
@@ -198,14 +199,14 @@ class HtdLyncClient(BaseClient):
             zone (int): the zone
         """
 
-        self._send_and_validate(
+        await self._async_send_and_validate(
             lambda z: z.power,
             zone,
             HtdLyncCommands.COMMON_COMMAND_CODE,
             HtdLyncCommands.POWER_ON_ZONE_COMMAND_CODE
         )
 
-    def power_off(self, zone: int):
+    async def async_power_off(self, zone: int):
         """
         Power off a zone.
 
@@ -213,14 +214,14 @@ class HtdLyncClient(BaseClient):
             zone (int): the zone
         """
 
-        self._send_and_validate(
+        await self._async_send_and_validate(
             lambda z: not z.power,
             zone,
             HtdLyncCommands.COMMON_COMMAND_CODE,
             HtdLyncCommands.POWER_OFF_ZONE_COMMAND_CODE
         )
 
-    def bass_up(self, zone: int):
+    async def async_bass_up(self, zone: int):
         """
         Increase the bass of a zone.
 
@@ -234,9 +235,9 @@ class HtdLyncClient(BaseClient):
         if new_bass >= HtdConstants.MAX_BASS:
             return
 
-        self.set_bass(zone, new_bass)
+        await self.async_set_bass(zone, new_bass)
 
-    def bass_down(self, zone: int):
+    async def async_bass_down(self, zone: int):
         """
         Decrease the bass of a zone.
 
@@ -250,9 +251,9 @@ class HtdLyncClient(BaseClient):
         if new_bass < HtdConstants.MIN_BASS:
             return
 
-        self.set_bass(zone, new_bass)
+        await self.async_set_bass(zone, new_bass)
 
-    def set_bass(self, zone: int, bass: int):
+    async def async_set_bass(self, zone: int, bass: int):
         """
         Set the bass of a zone.
 
@@ -260,15 +261,20 @@ class HtdLyncClient(BaseClient):
             zone (int): the zone
             bass (int): the bass value to set
         """
+        zone_info = self.get_zone(zone)
 
-        return self._send_cmd(
+        if zone_info.bass == bass:
+            return
+
+        return await self._async_send_and_validate(
+            lambda z: z.bass == bass,
             zone,
             HtdLyncCommands.COMMON_COMMAND_CODE,
             HtdLyncCommands.BASS_SETTING_CONTROL_COMMAND_CODE,
             bytearray([bass])
         )
 
-    def treble_up(self, zone: int):
+    async def async_treble_up(self, zone: int):
         """
         Increase the treble of a zone.
 
@@ -282,9 +288,9 @@ class HtdLyncClient(BaseClient):
         if new_treble >= HtdConstants.MAX_TREBLE:
             return
 
-        self.set_treble(zone, new_treble)
+        await self.async_set_treble(zone, new_treble)
 
-    def treble_down(self, zone: int):
+    async def async_treble_down(self, zone: int):
         """
         Decrease the treble of a zone.
 
@@ -298,9 +304,9 @@ class HtdLyncClient(BaseClient):
         if new_treble < HtdConstants.MIN_TREBLE:
             return
 
-        self.set_treble(zone, new_treble)
+        await self.async_set_treble(zone, new_treble)
 
-    def set_treble(self, zone: int, treble: int):
+    async def async_set_treble(self, zone: int, treble: int):
         """
         Set the treble of a zone.
 
@@ -309,14 +315,20 @@ class HtdLyncClient(BaseClient):
             treble (int): the treble value to set
         """
 
-        return self._send_cmd(
+        zone_info = self.get_zone(zone)
+
+        if treble == zone_info.treble:
+            return
+
+        return await self._async_send_and_validate(
+            lambda z: z.treble == treble,
             zone,
             HtdLyncCommands.COMMON_COMMAND_CODE,
             HtdLyncCommands.TREBLE_SETTING_CONTROL_COMMAND_CODE,
             bytearray([treble])
         )
 
-    def balance_left(self, zone: int):
+    async def async_balance_left(self, zone: int):
         """
         Increase the balance of a zone to the left.
 
@@ -330,9 +342,9 @@ class HtdLyncClient(BaseClient):
         if new_balance < HtdConstants.MIN_BALANCE:
             return
 
-        self.set_balance(zone, new_balance)
+        await self.async_set_balance(zone, new_balance)
 
-    def balance_right(self, zone: int):
+    async def async_balance_right(self, zone: int):
         """
         Increase the balance of a zone to the right.
 
@@ -346,9 +358,9 @@ class HtdLyncClient(BaseClient):
         if new_balance > HtdConstants.MAX_BALANCE:
             return
 
-        self.set_balance(zone, new_balance)
+        await self.async_set_balance(zone, new_balance)
 
-    def set_balance(self, zone: int, balance: int):
+    async def async_set_balance(self, zone: int, balance: int):
         """
         Set the balance of a zone.
 
@@ -357,7 +369,13 @@ class HtdLyncClient(BaseClient):
             balance (int): the balance value to set
         """
 
-        return self._send_cmd(
+        current_zone = self.get_zone(zone)
+
+        if balance == current_zone.balance:
+            return
+
+        return await self._async_send_and_validate(
+            lambda z: z.balance == balance,
             zone,
             HtdLyncCommands.BALANCE_SETTING_CONTROL_COMMAND_CODE,
             balance
