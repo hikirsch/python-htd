@@ -444,7 +444,7 @@ class BaseClient(asyncio.Protocol):
                     self._send_cmd(zone, follow_up[0], follow_up[1])
 
                 last_attempt_time = time.time()
-                await asyncio.sleep(0.01)
+            await asyncio.sleep(0)
 
 
 
