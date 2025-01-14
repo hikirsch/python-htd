@@ -64,10 +64,10 @@ class HtdConstants:
 
     # we will issue the command to the device and validate the response, if the response
     # is not what we expect, we will retry the command after this amount of time
-    DEFAULT_COMMAND_RETRY_TIMEOUT = 3
+    DEFAULT_COMMAND_RETRY_TIMEOUT = .5
 
     # the device is flakey, let's retry a bunch of times
-    DEFAULT_RETRY_ATTEMPTS = 5
+    DEFAULT_RETRY_ATTEMPTS = 3
 
     # the port of the device, default is 10006
     DEFAULT_PORT = 10006
