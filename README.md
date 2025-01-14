@@ -29,8 +29,8 @@ from base_client
 
 client = HtdClient("192.168.1.2")
 model_info = client.get_model_info()
-client.volume_up()
-client.volume_down()
+client.async_volume_up()
+client.async_volume_down()
 
 ```
 

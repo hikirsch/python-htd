@@ -28,7 +28,7 @@ class HtdMcaClient(BaseClient):
 
     def __init__(
         self,
-        loop: asyncio.AbstractEventLoop,
+        loop: asyncio.EventLoop,
         model_info: HtdModelInfo,
         network_address: Tuple[str, int] = None,
         serial_address: str = None,
@@ -83,29 +83,37 @@ class HtdMcaClient(BaseClient):
             if self._zone_data[zone].volume == self._target_volumes[zone]:
                 self._target_volumes[zone] = None
             else:
-                self._set_volume(zone)
+                asyncio.run_coroutine_threadsafe(self._async_set_volume(zone), self._loop)
 
-    def mute(self, zone: int):
+    async def async_mute(self, zone: int):
         if self._zone_data[zone].mute:
             return
 
-        self._toggle_mute(zone)
+        await self._async_toggle_mute(zone)
 
-    def unmute(self, zone: int):
+    async def async_unmute(self, zone: int):
         if not self._zone_data[zone].mute:
             return
 
-        self._toggle_mute(zone)
+        await self._async_toggle_mute(zone)
 
     def has_volume_target(self, zone: int):
         return self._target_volumes[zone] is not None
 
-    def set_volume(self, zone: int, volume: int):
+    async def async_set_volume(self, zone: int, volume: int):
+        existing = False
+
+        if self._target_volumes[zone] is not None:
+            existing = True
+
         self._target_volumes[zone] = volume
 
-        return self._set_volume(zone)
+        if existing:
+            return
 
-    def _set_volume(self, zone: int):
+        return await self._async_set_volume(zone)
+
+    async def _async_set_volume(self, zone: int):
         """
         Resume setting the volume of a zone.
 
@@ -114,6 +122,10 @@ class HtdMcaClient(BaseClient):
         """
 
         zone_info = self._zone_data[zone]
+
+        if not zone_info.power:
+            await self.async_power_on(zone)
+            return
 
         diff = self._target_volumes[zone] - zone_info.volume
 
@@ -125,7 +137,7 @@ class HtdMcaClient(BaseClient):
         else:
             volume_command = HtdMcaCommands.VOLUME_UP_COMMAND
 
-        self._send_and_validate(
+        await self._async_send_and_validate(
             lambda z: z.volume != zone_info.volume,
             zone,
             HtdMcaCommands.COMMON_COMMAND_CODE,
@@ -180,7 +192,7 @@ class HtdMcaClient(BaseClient):
             HtdMcaCommands.POWER_OFF_ALL_ZONES_COMMAND_CODE
         )
 
-    def set_source(self, zone: int, source: int):
+    async def async_set_source(self, zone: int, source: int):
         """
         Set the source of a zone.
 
@@ -188,17 +200,15 @@ class HtdMcaClient(BaseClient):
             zone (int): the zone
             source (int): the source to set
         """
-        # htd_client.utils.validate_zone(zone)
-        # htd_client.utils.validate_source(source)
 
-        return self._send_and_validate(
+        return await self._async_send_and_validate(
             lambda z: z.source == source,
             zone,
             HtdMcaCommands.COMMON_COMMAND_CODE,
             HtdMcaConstants.SOURCE_COMMAND_OFFSET + source
         )
 
-    def volume_up(self, zone: int):
+    async def async_volume_up(self, zone: int):
         """
         Increase the volume of a zone.
 
@@ -206,21 +216,19 @@ class HtdMcaClient(BaseClient):
             zone (int): the zone
         """
 
-        # htd_client.utils.validate_zone(zone)
-
         zone_info = self._zone_data[zone]
 
         if zone_info.volume == HtdConstants.MAX_VOLUME:
             return
 
-        self._send_and_validate(
+        await self._async_send_and_validate(
             lambda z: z.volume >= zone_info.volume + 1,
             zone,
             HtdMcaCommands.COMMON_COMMAND_CODE,
             HtdMcaCommands.VOLUME_UP_COMMAND
         )
 
-    def volume_down(self, zone: int):
+    async def async_volume_down(self, zone: int):
         """
         Decrease the volume of a zone.
 
@@ -230,14 +238,14 @@ class HtdMcaClient(BaseClient):
 
         zone_info = self._zone_data[zone]
 
-        self._send_and_validate(
+        await self._async_send_and_validate(
             lambda z: z.volume >= zone_info.volume - 1,
             zone,
             HtdMcaCommands.COMMON_COMMAND_CODE,
             HtdMcaCommands.VOLUME_DOWN_COMMAND
         )
 
-    def _toggle_mute(self, zone: int):
+    async def _async_toggle_mute(self, zone: int):
         """
         Toggle the mute state of a zone.
 
@@ -245,14 +253,14 @@ class HtdMcaClient(BaseClient):
             zone (int): the zone
         """
 
-        self._send_and_validate(
+        await self._async_send_and_validate(
             lambda z: z.mute != self._zone_data[zone].mute,
             zone,
             HtdMcaCommands.QUERY_COMMAND_CODE,
             HtdMcaCommands.TOGGLE_MUTE_COMMAND
         )
 
-    def power_on(self, zone: int):
+    async def async_power_on(self, zone: int):
         """
         Power on a zone.
 
@@ -260,14 +268,14 @@ class HtdMcaClient(BaseClient):
             zone (int): the zone
         """
 
-        self._send_and_validate(
+        await self._async_send_and_validate(
             lambda z: z.power,
             zone,
             HtdMcaCommands.COMMON_COMMAND_CODE,
             HtdMcaCommands.POWER_ON_ZONE_COMMAND_CODE
         )
 
-    def power_off(self, zone: int):
+    async def async_power_off(self, zone: int):
         """
         Power off a zone.
 
@@ -276,14 +284,18 @@ class HtdMcaClient(BaseClient):
 
         """
 
-        self._send_and_validate(
+        if self._target_volumes[zone] is not None:
+            _LOGGER.warning("Cannot power off zone %d while volume is being set!", zone)
+            return
+
+        await self._async_send_and_validate(
             lambda z: not z.power,
             zone,
             HtdMcaCommands.COMMON_COMMAND_CODE,
             HtdMcaCommands.POWER_OFF_ZONE_COMMAND_CODE
         )
 
-    def bass_up(self, zone: int):
+    async def async_bass_up(self, zone: int):
         """
         Increase the bass of a zone.
 
@@ -297,14 +309,14 @@ class HtdMcaClient(BaseClient):
         if new_bass < HtdConstants.MAX_BASS:
             return
 
-        self._send_and_validate(
+        await self._async_send_and_validate(
             lambda z: z.bass >= zone_info.bass + 1,
             zone,
             HtdMcaCommands.COMMON_COMMAND_CODE,
             HtdMcaCommands.BASS_UP_COMMAND
         )
 
-    def bass_down(self, zone: int):
+    async def async_bass_down(self, zone: int):
         """
         Decrease the bass of a zone.
 
@@ -318,14 +330,14 @@ class HtdMcaClient(BaseClient):
         if new_bass < HtdConstants.MIN_BASS:
             return
 
-        self._send_and_validate(
+        await self._async_send_and_validate(
             lambda z: z.bass <= zone_info.bass - 1,
             zone,
             HtdMcaCommands.COMMON_COMMAND_CODE,
             HtdMcaCommands.BASS_DOWN_COMMAND
         )
 
-    def treble_up(self, zone: int):
+    async def async_treble_up(self, zone: int):
         """
         Increase the treble of a zone.
 
@@ -339,14 +351,14 @@ class HtdMcaClient(BaseClient):
         if new_treble < HtdConstants.MAX_TREBLE:
             return
 
-        self._send_and_validate(
+        await self._async_send_and_validate(
             lambda z: z.treble >= zone_info.treble + 1,
             zone,
             HtdMcaCommands.COMMON_COMMAND_CODE,
             HtdMcaCommands.TREBLE_UP_COMMAND
         )
 
-    def treble_down(self, zone: int):
+    async def async_treble_down(self, zone: int):
         """
         Decrease the treble of a zone.
 
@@ -360,14 +372,14 @@ class HtdMcaClient(BaseClient):
         if new_treble < HtdConstants.MIN_TREBLE:
             return
 
-        self._send_and_validate(
+        await self._async_send_and_validate(
             lambda z: z.treble <= zone_info.treble - 1,
             zone,
             HtdMcaCommands.COMMON_COMMAND_CODE,
             HtdMcaCommands.TREBLE_DOWN_COMMAND
         )
 
-    def balance_left(self, zone: int):
+    async def async_balance_left(self, zone: int):
         """
         Increase the balance toward the left for a zone.
 
@@ -381,14 +393,14 @@ class HtdMcaClient(BaseClient):
         if new_balance < HtdConstants.MIN_BALANCE:
             return
 
-        self._send_and_validate(
+        await self._async_send_and_validate(
             lambda z: z.balance <= zone_info.balance - 1,
             zone,
             HtdMcaCommands.COMMON_COMMAND_CODE,
             HtdMcaCommands.BALANCE_LEFT_COMMAND
         )
 
-    def balance_right(self, zone: int):
+    async def async_balance_right(self, zone: int):
         """
         Increase the balance toward the right for a zone.
 
@@ -402,7 +414,7 @@ class HtdMcaClient(BaseClient):
         if new_balance > HtdConstants.MAX_BALANCE:
             return
 
-        self._send_and_validate(
+        await self._async_send_and_validate(
             lambda z: z.balance >= zone_info.balance + 1,
             zone,
             HtdMcaCommands.COMMON_COMMAND_CODE,
