@@ -14,6 +14,7 @@
 import asyncio
 import logging
 import threading
+import time
 from abc import abstractmethod
 from asyncio import Transport
 from typing import Dict, Tuple
@@ -132,6 +133,8 @@ class BaseClient(asyncio.Protocol):
             self._buffer += new_data
 
             _LOGGER.debug("Received new data %s" % htd_client.utils.stringify_bytes(new_data))
+
+            # if self._socket_lock.locked():
 
             with self._socket_lock:
                 while len(self._buffer) > 0:
@@ -421,24 +424,28 @@ class BaseClient(asyncio.Protocol):
         """
 
         attempts = 0
+        last_attempt_time = 0
 
         while not validate(self.get_zone(zone)):
-            attempts += 1
+            if int(time.time() - last_attempt_time) > self._command_retry_timeout:
+                attempts += 1
 
-            if attempts > self._retry_attempts:
-                raise Exception(f"Failed to execute command after {self._retry_attempts} attempts")
+                if attempts > self._retry_attempts:
+                    raise Exception(f"Failed to execute command after {self._retry_attempts} attempts")
 
-            # we only want to call refresh if we have already tried
-            if attempts > 1:
-                self.refresh(zone)
+                # we only want to call refresh if we have already tried
+                if attempts > 1:
+                    self.refresh(zone)
 
-            self._send_cmd(zone, command, data_code, extra_data)
+                self._send_cmd(zone, command, data_code, extra_data)
 
-            # setting volume on lync requires you to unmute, so a followup command is used
-            if follow_up is not None:
-                self._send_cmd(zone, follow_up[0], follow_up[1])
+                # setting volume on lync requires you to unmute, so a followup command is used
+                if follow_up is not None:
+                    self._send_cmd(zone, follow_up[0], follow_up[1])
 
-            await asyncio.sleep(self._command_retry_timeout)
+                last_attempt_time = time.time()
+                await asyncio.sleep(0.01)
+
 
 
     def _send_cmd(
