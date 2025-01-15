@@ -507,7 +507,7 @@ class BaseClient(asyncio.Protocol):
         """
         return self._zone_data[zone]
 
-    def async_toggle_mute(self, zone: int):
+    async def async_toggle_mute(self, zone: int):
         """
         Toggle the mute state of a zone.
 
@@ -517,9 +517,9 @@ class BaseClient(asyncio.Protocol):
         zone_detail = self.get_zone(zone)
 
         if zone_detail.mute:
-            self.async_unmute(zone)
+            await self.async_unmute(zone)
         else:
-            self.async_mute(zone)
+            await self.async_mute(zone)
 
     @abstractmethod
     def refresh(self, zone: int = None):
