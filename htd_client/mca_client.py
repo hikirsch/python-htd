@@ -111,6 +111,11 @@ class HtdMcaClient(BaseClient):
         if existing:
             return
 
+        zone_info = self._zone_data[zone]
+
+        if not zone_info.power:
+            await self.async_power_on(zone)
+
         return await self._async_set_volume(zone)
 
     async def _async_set_volume(self, zone: int):
@@ -124,13 +129,13 @@ class HtdMcaClient(BaseClient):
         zone_info = self._zone_data[zone]
 
         if not zone_info.power:
-            await self.async_power_on(zone)
+            self._target_volumes[zone] = None
             return
 
         diff = self._target_volumes[zone] - zone_info.volume
 
         if diff == 0:
-            return zone_info
+            return
 
         if diff < 0:
             volume_command = HtdMcaCommands.VOLUME_DOWN_COMMAND
@@ -283,10 +288,6 @@ class HtdMcaClient(BaseClient):
             zone (int): the zone
 
         """
-
-        if self._target_volumes[zone] is not None:
-            _LOGGER.warning("Cannot power off zone %d while volume is being set!", zone)
-            return
 
         await self._async_send_and_validate(
             lambda z: not z.power,
