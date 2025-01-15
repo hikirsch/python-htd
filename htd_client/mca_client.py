@@ -258,10 +258,12 @@ class HtdMcaClient(BaseClient):
             zone (int): the zone
         """
 
+        zone_info = self._zone_data[zone]
+
         await self._async_send_and_validate(
-            lambda z: z.mute != self._zone_data[zone].mute,
+            lambda z: zone_info.mute != z.mute,
             zone,
-            HtdMcaCommands.QUERY_COMMAND_CODE,
+            HtdMcaCommands.COMMON_COMMAND_CODE,
             HtdMcaCommands.TOGGLE_MUTE_COMMAND
         )
 
