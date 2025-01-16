@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "htd-client"
-version = "0.0.20"
+version = "0.0.21"
 description = "A client supporting Home Theater Direct's gateway device."
 authors = [
     "Adam Kirschner <accounts@adamskirschner.com>"

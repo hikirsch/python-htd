@@ -303,7 +303,8 @@ class BaseClient(asyncio.Protocol):
 
         elif cmd == HtdCommonCommands.ZONE_STATUS_RECEIVE_COMMAND:
             zone_data = self._parse_zone(zone, data)
-            zone_data.enabled = self._zone_data[zone].enabled
+            if self.has_zone_data(zone):
+                zone_data.enabled = self._zone_data[zone].enabled
             self._zone_data[zone] = zone_data
             _LOGGER.debug("Got new state: %s", zone_data)
 
@@ -388,7 +389,7 @@ class BaseClient(asyncio.Protocol):
             self._subscribers.add(callback)
             # if we're already ready, call the callback immediately and let them update
             if self._ready:
-                callback(None)
+                callback(0)
 
     async def async_unsubscribe(self, callback):
         with self._callback_lock:
