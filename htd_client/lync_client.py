@@ -119,12 +119,17 @@ class HtdLyncClient(BaseClient):
             zone (int): the zone
             source (int): the source to set
         """
+        if source == self.model["sources"]:
+            source_data = HtdLyncConstants.INTERCOM_SOURCE_DATA
+        else:
+            source_offset = HtdLyncConstants.SOURCE_13_HIGHER_COMMAND_OFFSET if source > 12 else HtdLyncConstants.SOURCE_COMMAND_OFFSET
+            source_data = source + source_offset
 
         return await self._async_send_and_validate(
             lambda z: z.source == source,
             zone,
             HtdLyncCommands.COMMON_COMMAND_CODE,
-            HtdLyncConstants.SOURCE_COMMAND_OFFSET + source
+            source_data,
         )
 
     async def async_volume_up(self, zone: int):
