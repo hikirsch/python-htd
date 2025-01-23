@@ -41,7 +41,7 @@ class HtdConstants:
             "zones": 6,
             "sources": 13,
             "friendly_name": "Lync 6",
-            "name": "Lync 6",
+            "name": "Lync6",
             "kind": HtdDeviceKind.lync,
         },
         "lync12": {
