@@ -39,7 +39,7 @@ class HtdConstants:
         "lync6": {
             "identifier": b"Lync 6",
             "zones": 6,
-            "sources": 12,
+            "sources": 13,
             "friendly_name": "Lync 6",
             "name": "Lync 6",
             "kind": HtdDeviceKind.lync,
@@ -47,7 +47,7 @@ class HtdConstants:
         "lync12": {
             "identifier": b"Lync12",
             "zones": 12,
-            "sources": 18,
+            "sources": 19,
             "friendly_name": "Lync 12",
             "name": "Lync12",
             "kind": HtdDeviceKind.lync,
@@ -205,7 +205,9 @@ class HtdLyncConstants:
 
         # when setting the source, you use the SET command and add this to the
     # source number desired, e.g Zone 3 + 15 = data value 18, or 0x12 for lync
+    INTERCOM_SOURCE_DATA = 0x7E
     SOURCE_COMMAND_OFFSET = 0x10 - 1
+    SOURCE_13_HIGHER_COMMAND_OFFSET = 0x63 - 13
     SOURCE_EXTRA_ZONE_COMMAND_OFFSET = 0x63 - 1
     PARTY_MODE_COMMAND_OFFSET = 0x36 - 1
     PARTY_MODE_EXTRA_ZONE_COMMAND_OFFSET = 0x69 - 1

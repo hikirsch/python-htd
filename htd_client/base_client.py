@@ -150,6 +150,8 @@ class BaseClient(asyncio.Protocol):
         except Exception as e:
             _LOGGER.error(f"Error processing data!")
             _LOGGER.exception(e)
+            self._buffer = None
+            self._loop.run_in_executor(None, self.refresh, zone)
 
 
     def connection_lost(self, exc):
