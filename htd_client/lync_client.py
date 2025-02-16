@@ -144,7 +144,7 @@ class HtdLyncClient(BaseClient):
 
         new_volume = current_zone.volume + 1
 
-        if new_volume > HtdConstants.MAX_RAW_VOLUME:
+        if new_volume > HtdConstants.MAX_VOLUME:
             return
 
         await self.async_set_volume(zone, new_volume)

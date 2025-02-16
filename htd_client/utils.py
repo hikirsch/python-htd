@@ -4,7 +4,7 @@ from typing import Literal, Tuple
 
 from serial_asyncio import open_serial_connection
 
-from .constants import HtdConstants, MAX_BYTES_TO_RECEIVE
+from .constants import HtdConstants, MAX_BYTES_TO_RECEIVE, HtdDeviceKind
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -110,17 +110,20 @@ def convert_value(value: int):
     return value - 0x100 if value > 0x7F else value
 
 
-def convert_volume(raw_volume: int) -> int:
+def convert_volume(kind: HtdDeviceKind, raw_volume: int) -> int:
     """
     Convert the volume into a usable value. the device will transmit a number between 196 - 255. if it's at max volume, the raw volume will come as 0. this is probably because the gateway only transmits 8 bits per byte. 255 is 0b11111111. since there's no volume = 0 (use mute I guess), if the volume hits 0, it's because it's at max volume, so we make it 256. credit for this goes to lounsbrough
 
     Args:
+        kind (HtdDeviceKind): the kind of device this is for, to determine how we need to convert the volume
         raw_volume (int): the raw volume amount, a number usually ranges from 196 to 255
 
     Returns:
         (int, int): A tuple where the first number is a percentage, and the second is the raw volume from 0 to 60
     """
     if raw_volume == 0:
+        if kind == HtdDeviceKind.lync:
+            return 0
         return HtdConstants.MAX_VOLUME
 
     htd_volume = raw_volume - HtdConstants.VOLUME_OFFSET
