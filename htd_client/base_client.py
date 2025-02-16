@@ -363,6 +363,7 @@ class BaseClient(asyncio.Protocol):
         )
 
         volume = htd_client.utils.convert_volume(
+            self._model_info["kind"],
             zone_data[HtdConstants.VOLUME_ZONE_DATA_INDEX]
         )
 

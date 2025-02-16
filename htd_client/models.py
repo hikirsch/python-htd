@@ -16,13 +16,13 @@ class ZoneDetail:
 
     def __str__(self):
         return (
-            "enabled = %s, name = %s, zone_number = %s, power = %s, "
+            "zone_number = %s, enabled = %s, name = %s, power = %s, "
             "mute = %s, mode = %s, source = %s, volume = %s, "
             "treble = %s, bass = %s, balance = %s" %
             (
+                self.number,
                 self.enabled,
                 self.name,
-                self.number,
                 self.power,
                 self.mute,
                 self.mode,

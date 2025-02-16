@@ -77,7 +77,7 @@ class HtdConstants:
 
     # 255 is the max value you can have with 1 byte. the volume max is 60.
     # so, we use 256 to represent a real 100% when computing the volume
-    MAX_RAW_VOLUME = 256
+    MAX_RAW_VOLUME = 255
     MAX_VOLUME = 60
 
     VOLUME_OFFSET = MAX_RAW_VOLUME - MAX_VOLUME

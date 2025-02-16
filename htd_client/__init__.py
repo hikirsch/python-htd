@@ -97,7 +97,7 @@ async def async_get_model_info(
 
     for model_name in HtdConstants.SUPPORTED_MODELS:
         model = HtdConstants.SUPPORTED_MODELS[model_name]
-        if model_id in model["identifier"]:
+        if model["identifier"] in model_id:
             return model
 
     return None
