@@ -76,36 +76,36 @@ class HtdLyncClient(BaseClient):
         )
 
 
-    def refresh(self, zone: int = None):
+    async def refresh(self, zone: int = None):
         """
         Refresh a zone or all zones.
 
         Args:
             zone (int): the zone to refresh, or None to refresh all zones
         """
-        self._send_cmd(
+        await self._send_cmd(
             zone if zone is not None else 0,
             HtdLyncCommands.QUERY_COMMAND_CODE,
             1
         )
 
-    def power_on_all_zones(self):
+    async def power_on_all_zones(self):
         """
         Power on all zones.
         """
 
-        return self._send_cmd(
+        return await self._send_cmd(
             1,
             HtdLyncCommands.COMMON_COMMAND_CODE,
             HtdLyncCommands.POWER_ON_ALL_ZONES_COMMAND_CODE
         )
 
-    def power_off_all_zones(self):
+    async def power_off_all_zones(self):
         """
         Power off all zones.
         """
 
-        return self._send_cmd(
+        return await self._send_cmd(
             1,
             HtdLyncCommands.COMMON_COMMAND_CODE,
             HtdLyncCommands.POWER_OFF_ALL_ZONES_COMMAND_CODE
