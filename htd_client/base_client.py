@@ -50,6 +50,8 @@ class BaseClient(asyncio.Protocol):
     _connected: bool = False
     _ready: bool = False
 
+    _disconnected: bool = True
+
     def __init__(
         self,
         loop: asyncio.AbstractEventLoop,
@@ -92,6 +94,7 @@ class BaseClient(asyncio.Protocol):
         self._zones_loaded = 0
         self._zone_data = {}
         self._connection = None
+        self._disconnected = False
 
         if self._serial_address is not None:
             await create_serial_connection(
@@ -156,12 +159,14 @@ class BaseClient(asyncio.Protocol):
 
     def connection_lost(self, exc):
         _LOGGER.info("Connection has been disconnected!")
+
         self._ready = False
         self._connected = False
         self._buffer = None
         self._heartbeat_task.cancel()
 
-        asyncio.create_task(self.async_connect())
+        if not self._disconnected:
+            asyncio.create_task(self.async_connect())
 
 
     async def async_wait_until_ready(self):
@@ -182,6 +187,7 @@ class BaseClient(asyncio.Protocol):
 
 
     def disconnect(self):
+        self._disconnect = True
         self._connection.close()
 
 

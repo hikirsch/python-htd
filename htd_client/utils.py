@@ -123,8 +123,8 @@ def convert_volume(kind: HtdDeviceKind, raw_volume: int) -> int:
     """
     if raw_volume == 0:
         if kind == HtdDeviceKind.lync:
-            return 0
-        return HtdConstants.MAX_VOLUME
+            return HtdConstants.MAX_VOLUME
+        return 0
 
     htd_volume = raw_volume - HtdConstants.VOLUME_OFFSET
 

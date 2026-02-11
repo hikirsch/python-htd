@@ -39,7 +39,7 @@ class HtdConstants:
         "lync6": {
             "identifier": b"Lync 6",
             "zones": 6,
-            "sources": 13,
+            "sources": 12,
             "friendly_name": "Lync 6",
             "name": "Lync6",
             "kind": HtdDeviceKind.lync,
@@ -77,7 +77,7 @@ class HtdConstants:
 
     # 255 is the max value you can have with 1 byte. the volume max is 60.
     # so, we use 256 to represent a real 100% when computing the volume
-    MAX_RAW_VOLUME = 255
+    MAX_RAW_VOLUME = 256
     MAX_VOLUME = 60
 
     VOLUME_OFFSET = MAX_RAW_VOLUME - MAX_VOLUME
