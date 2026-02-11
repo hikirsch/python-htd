@@ -149,7 +149,7 @@ class HtdMcaClient(BaseClient):
             volume_command
         )
 
-    def refresh(self, zone: int = None):
+    async def refresh(self, zone: int = None):
         """
         Query all zones and return a dict of `ZoneDetail`
 
@@ -159,9 +159,9 @@ class HtdMcaClient(BaseClient):
         """
 
         refresh_zone = zone if zone is not None else 0
-        self.refresh_zone(refresh_zone)
+        await self.refresh_zone(refresh_zone)
 
-    def refresh_zone(self, zone: int):
+    async def refresh_zone(self, zone: int):
         """
         Refresh a specific zone
 
@@ -169,29 +169,29 @@ class HtdMcaClient(BaseClient):
             zone (int): the zone number
         """
 
-        self._send_cmd(
+        await self._send_cmd(
             zone,
             HtdMcaCommands.QUERY_COMMAND_CODE,
             0
         )
 
-    def power_on_all_zones(self):
+    async def power_on_all_zones(self):
         """
         Power on all zones.
         """
 
-        return self._send_cmd(
+        return await self._send_cmd(
             1,
             HtdMcaCommands.COMMON_COMMAND_CODE,
             HtdMcaCommands.POWER_ON_ALL_ZONES_COMMAND_CODE
         )
 
-    def power_off_all_zones(self):
+    async def power_off_all_zones(self):
         """
         Power off all zones.
         """
 
-        return self._send_cmd(
+        return await self._send_cmd(
             1,
             HtdMcaCommands.COMMON_COMMAND_CODE,
             HtdMcaCommands.POWER_OFF_ALL_ZONES_COMMAND_CODE

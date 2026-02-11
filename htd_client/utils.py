@@ -91,7 +91,7 @@ async def async_send_command(
         reader, writer = await asyncio.open_connection(host, port)
 
     else:
-        raise "unable to connect, no address"
+        raise ValueError("unable to connect, no address")
 
     writer.write(cmd)
     await writer.drain()

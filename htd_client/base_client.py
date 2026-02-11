@@ -13,7 +13,6 @@
 """
 import asyncio
 import logging
-import threading
 import time
 from abc import abstractmethod
 from asyncio import Transport
@@ -39,8 +38,8 @@ class BaseClient(asyncio.Protocol):
     _socket_timeout_sec: float = None
 
     _subscribers: set = None
-    _socket_lock: threading.Lock = None
-    _callback_lock: threading.Lock = None
+    _socket_lock: asyncio.Lock = None
+    _callback_lock: asyncio.Lock = None
 
     _connection: Transport | None = None
     _heartbeat_task: asyncio.Task = None
@@ -70,8 +69,8 @@ class BaseClient(asyncio.Protocol):
         self._retry_attempts = retry_attempts
         self._socket_timeout_sec = socket_timeout / ONE_SECOND
         self._subscribers = set()
-        self._socket_lock = threading.Lock()
-        self._callback_lock = threading.Lock()
+        self._socket_lock = asyncio.Lock()
+        self._callback_lock = asyncio.Lock()
 
     @property
     def connected(self):
@@ -113,7 +112,7 @@ class BaseClient(asyncio.Protocol):
             await self._loop.create_connection(lambda: self, host, port)
 
         else:
-            raise "No address provided"
+            raise ValueError("No address provided")
 
     def connection_made(self, transport: Transport):
         _LOGGER.debug("connected")
@@ -124,7 +123,7 @@ class BaseClient(asyncio.Protocol):
 
     async def _heartbeat(self):
         while self._connected:
-            self.refresh()
+            await self.refresh()
             await asyncio.sleep(60)
 
 
@@ -137,24 +136,21 @@ class BaseClient(asyncio.Protocol):
 
             _LOGGER.debug("Received new data %s" % htd_client.utils.stringify_bytes(new_data))
 
-            # if self._socket_lock.locked():
+            while len(self._buffer) > 0:
+                (zone, chunk_length) = self._process_next_command(self._buffer)
 
-            with self._socket_lock:
-                while len(self._buffer) > 0:
-                    (zone, chunk_length) = self._process_next_command(self._buffer)
+                if chunk_length == 0:
+                    return
 
-                    if chunk_length == 0:
-                        return
+                self._buffer = self._buffer[chunk_length:]
 
-                    self._buffer = self._buffer[chunk_length:]
-
-                    self._loop.run_in_executor(None, self._broadcast, zone)
+                self._loop.create_task(self._broadcast(zone))
 
         except Exception as e:
             _LOGGER.error(f"Error processing data!")
             _LOGGER.exception(e)
             self._buffer = None
-            self._loop.run_in_executor(None, self.refresh, zone)
+            self._loop.create_task(self.refresh())
 
 
     def connection_lost(self, exc):
@@ -187,7 +183,7 @@ class BaseClient(asyncio.Protocol):
 
 
     def disconnect(self):
-        self._disconnect = True
+        self._disconnected = True
         self._connection.close()
 
 
@@ -394,18 +390,18 @@ class BaseClient(asyncio.Protocol):
         return zone
 
     async def async_subscribe(self, callback):
-        with self._callback_lock:
+        async with self._callback_lock:
             self._subscribers.add(callback)
             # if we're already ready, call the callback immediately and let them update
             if self._ready:
                 callback(0)
 
     async def async_unsubscribe(self, callback):
-        with self._callback_lock:
+        async with self._callback_lock:
             self._subscribers.discard(callback)
 
-    def _broadcast(self, zone: int = None):
-        with self._callback_lock:
+    async def _broadcast(self, zone: int = None):
+        async with self._callback_lock:
             for callback in self._subscribers:
                 callback(zone)
 
@@ -445,20 +441,20 @@ class BaseClient(asyncio.Protocol):
 
                 # we only want to call refresh if we have already tried
                 if attempts > 1:
-                    self.refresh(zone)
+                    await self.refresh(zone)
 
-                self._send_cmd(zone, command, data_code, extra_data)
+                await self._send_cmd(zone, command, data_code, extra_data)
 
                 # setting volume on lync requires you to unmute, so a followup command is used
                 if follow_up is not None:
-                    self._send_cmd(zone, follow_up[0], follow_up[1])
+                    await self._send_cmd(zone, follow_up[0], follow_up[1])
 
                 last_attempt_time = time.time()
             await asyncio.sleep(0)
 
 
 
-    def _send_cmd(
+    async def _send_cmd(
         self,
         zone: int,
         command: int,
@@ -470,7 +466,7 @@ class BaseClient(asyncio.Protocol):
 
         _LOGGER.debug("sending command %s" % htd_client.utils.stringify_bytes(cmd))
 
-        with self._socket_lock:
+        async with self._socket_lock:
             self._connection.write(cmd)
 
                 # self._connection.flush()
@@ -532,69 +528,69 @@ class BaseClient(asyncio.Protocol):
             await self.async_mute(zone)
 
     @abstractmethod
-    def refresh(self, zone: int = None):
+    async def refresh(self, zone: int = None):
         pass
 
     @abstractmethod
-    def power_on_all_zones(self):
+    async def power_on_all_zones(self):
         pass
 
     @abstractmethod
-    def power_off_all_zones(self):
+    async def power_off_all_zones(self):
         pass
 
     @abstractmethod
-    def async_set_source(self, zone: int, source: int):
+    async def async_set_source(self, zone: int, source: int):
         pass
 
     @abstractmethod
-    def async_volume_up(self, zone: int):
+    async def async_volume_up(self, zone: int):
         pass
 
     @abstractmethod
-    def async_set_volume(self, zone: int, volume: int):
+    async def async_set_volume(self, zone: int, volume: int):
         pass
 
     @abstractmethod
-    def async_volume_down(self, zone: int):
+    async def async_volume_down(self, zone: int):
         pass
 
     @abstractmethod
-    def async_mute(self, zone: int):
+    async def async_mute(self, zone: int):
         pass
 
     @abstractmethod
-    def async_unmute(self, zone: int):
+    async def async_unmute(self, zone: int):
         pass
 
     @abstractmethod
-    def async_power_on(self, zone: int):
+    async def async_power_on(self, zone: int):
         pass
 
     @abstractmethod
-    def async_power_off(self, zone: int):
+    async def async_power_off(self, zone: int):
         pass
 
     @abstractmethod
-    def async_bass_up(self, zone: int):
+    async def async_bass_up(self, zone: int):
         pass
 
     @abstractmethod
-    def async_bass_down(self, zone: int):
+    async def async_bass_down(self, zone: int):
         pass
 
     @abstractmethod
-    def async_treble_up(self, zone: int):
+    async def async_treble_up(self, zone: int):
         pass
 
     @abstractmethod
-    def async_treble_down(self, zone: int):
+    async def async_treble_down(self, zone: int):
         pass
 
     @abstractmethod
-    def async_balance_left(self, zone: int):
+    async def async_balance_left(self, zone: int):
         pass
 
     @abstractmethod
-    def async_balance_right(self, zone: int):
+    async def async_balance_right(self, zone: int):
         pass
