@@ -130,7 +130,7 @@ def convert_volume(kind: HtdDeviceKind, raw_volume: int) -> int:
 
 
 def convert_volume_to_raw(volume: int) -> int:
-    if volume == 0:
+    if volume == HtdConstants.MAX_VOLUME:
         return 0
 
     return HtdConstants.MAX_RAW_VOLUME - (HtdConstants.MAX_VOLUME - volume)
