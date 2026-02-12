@@ -309,7 +309,7 @@ class HtdMcaClient(BaseClient):
         zone_info = self._zone_data[zone]
 
         new_bass = zone_info.bass + 1
-        if new_bass < HtdConstants.MAX_BASS:
+        if new_bass > HtdConstants.MAX_BASS:
             return
 
         await self._async_send_and_validate(
@@ -351,7 +351,7 @@ class HtdMcaClient(BaseClient):
         zone_info = self._zone_data[zone]
 
         new_treble = zone_info.treble + 1
-        if new_treble < HtdConstants.MAX_TREBLE:
+        if new_treble > HtdConstants.MAX_TREBLE:
             return
 
         await self._async_send_and_validate(

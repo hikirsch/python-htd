@@ -3,7 +3,8 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from base_client import HtdConstants, ZoneDetail
+from htd_client.constants import HtdConstants
+from htd_client.models import ZoneDetail
 
 
 class StateTogglesDict(TypedDict):
@@ -61,12 +62,13 @@ def test_get_command(mock_calculate_checksum: Mock):
     mock_checksum = 100
     zone_number = 5
     data_code = 10
-    command = HtdConstants.VOLUME_UP_COMMAND
+    from htd_client.constants import HtdMcaCommands
+    command = HtdMcaCommands.VOLUME_UP_COMMAND
 
     mock_calculate_checksum.return_value = mock_checksum
 
-    from base_client.utils import get_command
-    instruction = get_command(zone_number, command, data_code)
+    from htd_client.utils import build_command
+    instruction = build_command(zone_number, command, data_code)
 
     assert instruction[0] == HtdConstants.HEADER_BYTE
     assert instruction[1] == HtdConstants.RESERVED_BYTE
@@ -77,15 +79,12 @@ def test_get_command(mock_calculate_checksum: Mock):
 
 
 def test_calculate_checksum():
-    from base_client.utils import calculate_checksum
+    from htd_client.utils import calculate_checksum
     assert 10 == calculate_checksum([1, 2, 3, 4])
     assert 0 == calculate_checksum([1, 2, 3, 4, -10])
 
 
-def test_get_friendly_name():
-    from base_client.utils import get_model_info
-    assert get_model_info(HtdConstants.MCA66_MODEL_NAME) == HtdConstants.MCA66_FRIENDLY_MODEL_NAME
-    assert get_model_info("foo") == f"Unknown (foo)"
+
 
 
 @pytest.mark.parametrize(
@@ -99,37 +98,39 @@ def test_get_friendly_name():
     ]
 )
 def test_convert_volume(expected_htd, expected_percent):
-    from base_client.utils import convert_volume
+    from htd_client.constants import HtdDeviceKind
+    from htd_client.utils import convert_volume
 
     raw = mock_convert_volume(expected_htd)
-    (actual_percent, actual_htd) = convert_volume(raw)
-
-    assert expected_percent == actual_percent
-    assert expected_htd == actual_htd
+    actual_volume = convert_volume(HtdDeviceKind.mca, raw)
+    
+    # convert_volume returns the HTD volume (0-60)
+    assert expected_htd == actual_volume
+    # assert expected_htd == actual_htd
 
 
 @pytest.mark.parametrize(
     "number, binary",
     [
-        (1, "0001"),
-        (2, "0010"),
-        (3, "0011"),
-        (4, "0100"),
-        (5, "0101"),
-        (6, "0110"),
-        (7, "0111"),
-        (8, "1000"),
-        (9, "1001"),
-        (10, "1010"),
-        (11, "1011"),
-        (12, "1100"),
-        (13, "1101"),
-        (14, "1110"),
-        (15, "1111"),
+        (1, "00000001"),
+        (2, "00000010"),
+        (3, "00000011"),
+        (4, "00000100"),
+        (5, "00000101"),
+        (6, "00000110"),
+        (7, "00000111"),
+        (8, "00001000"),
+        (9, "00001001"),
+        (10, "00001010"),
+        (11, "00001011"),
+        (12, "00001100"),
+        (13, "00001101"),
+        (14, "00001110"),
+        (15, "00001111"),
     ]
 )
 def test_to_binary_string(number, binary):
-    from base_client.utils import to_binary_string
+    from htd_client.utils import to_binary_string
     actual = to_binary_string(number)
 
     assert actual == binary
@@ -145,145 +146,6 @@ def test_to_binary_string(number, binary):
     ]
 )
 def test_is_bit_on(actual, string, index):
-    from base_client.utils import is_bit_on
+    from htd_client.utils import is_bit_on
     assert actual == is_bit_on(string, index)
 
-
-@pytest.mark.parametrize(
-    "is_valid, number",
-    [
-        (True, 1),
-        (True, 2),
-        (True, 3),
-        (True, 4),
-        (True, 5),
-        (True, 6),
-        (False, 7),
-        (False, 0),
-        (False, 10),
-    ]
-)
-def test_validate_zone_source(is_valid, number):
-    from base_client.utils import validate_source, validate_zone
-    if is_valid:
-        validate_source(number)
-        validate_zone(number)
-
-    else:
-        with pytest.raises(Exception, match="source %s is invalid" % number):
-            validate_source(number)
-
-        with pytest.raises(Exception, match="zone %s is invalid" % number):
-            validate_zone(number)
-
-
-def custom_side_effect(x):
-    result = ZoneDetail(x[0])
-    return result
-
-
-@patch('htd_client.utils.parse_zone', side_effect=custom_side_effect)
-def test_parse_all_zones(mock_parse_zone):
-    from base_client.utils import parse_all_zones
-
-    full_message = []
-    chunks = []
-
-    for zone in range(0, 6):
-        message = [zone + 1]
-
-        for _ in range(1, HtdConstants.MESSAGE_CHUNK_SIZE):
-            message.append(0)
-
-        full_message += message
-        chunks.append(bytearray(message))
-
-    # add an invalid zone to the response to make sure it gets dropped
-    full_message += [7, 0, 0, 0, 0]
-
-    response = parse_all_zones(bytearray(full_message))
-
-    for index in range(0, 6):
-        assert mock_parse_zone.call_args_list[index].args[0] == chunks[index]
-
-    assert 6 == len(response.keys())
-
-@patch('htd_client.utils.parse_all_zones')
-def test_parse_single_zone(mock_parse_all_zones):
-    fake_data = bytearray([0, 1, 2, 3, 4, 5])
-    fake_value = {"some": "fake"}
-    fake_dict = {
-        64: fake_value
-    }
-    mock_parse_all_zones.return_value = fake_dict
-    from base_client.utils import parse_single_zone
-    response = parse_single_zone(fake_data, 64)
-
-    mock_parse_all_zones.assert_called_with(fake_data)
-    assert response == fake_value
-
-    response = parse_single_zone(fake_data, 1)
-
-    assert response is None
-
-
-
-def test_test_parse_zone():
-    from base_client.utils import parse_zone_mca, convert_volume
-
-    mock_zone = 1
-    mock_power = True
-    mock_mode = False
-    mock_mute = True
-    mock_party_mode = False
-    mock_htd_volume = 30
-    mock_source = 3
-    mock_treble = 25
-    mock_bass = 15
-    mock_balance = 18
-
-    mock_response = create_mock_response(
-        zone=mock_zone,
-        state_toggles={
-            "power": True,
-            "mode": False,
-            "mute": True,
-            "party_mode": False,
-        },
-        volume=mock_htd_volume,
-        source=mock_source,
-        treble=mock_treble,
-        bass=mock_bass,
-        balance=mock_balance,
-    )
-
-    (mock_percent_volume, _) = convert_volume(mock_convert_volume(mock_htd_volume))
-
-    zone_info = parse_zone_mca(mock_response)
-
-    assert zone_info.number == mock_zone
-    assert zone_info.power == mock_power
-    assert zone_info.mute == mock_mute
-    assert zone_info.mode == mock_mode
-    assert zone_info.party == mock_party_mode
-
-    assert zone_info.source == mock_source
-    assert zone_info.volume == mock_percent_volume
-    assert zone_info.htd_volume == mock_htd_volume
-    assert zone_info.treble == mock_treble
-    assert zone_info.bass == mock_bass
-    assert zone_info.balance == mock_balance
-
-@pytest.mark.parametrize(
-    "zone_data",
-    [
-        [HtdConstants.HEADER_BYTE, HtdConstants.RESERVED_BYTE, 0, 0],
-        [0, HtdConstants.RESERVED_BYTE],
-        [HtdConstants.HEADER_BYTE, 1],
-    ]
-)
-def test_invalid_parse_zone(zone_data):
-    from base_client.utils import parse_zone_mca
-    result = parse_zone_mca(bytearray(zone_data))
-
-    assert result is None

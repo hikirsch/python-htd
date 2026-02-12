@@ -249,9 +249,8 @@ class BaseClient(asyncio.Protocol):
         expected_length = HtdCommonCommands.EXPECTED_MESSAGE_LENGTH_MAP[command]
 
         if command == HtdCommonCommands.UNDEFINED_RECEIVE_COMMAND:
-            _LOGGER.info("Undefined response command: %02x", int(command))
             _LOGGER.debug("Packet buffer: %s", htd_client.utils.stringify_bytes(data[0:20]))
-            return start_message_index + HtdConstants.MESSAGE_HEADER_LENGTH
+            return None, start_message_index + HtdConstants.MESSAGE_HEADER_LENGTH
 
         # not enough data, wait for more
         if len(data) <= data_idx + expected_length:
@@ -285,6 +284,7 @@ class BaseClient(asyncio.Protocol):
 
     def _parse_command(self, zone, cmd, data):
         if cmd == HtdCommonCommands.KEYPAD_EXISTS_RECEIVE_COMMAND:
+            print(f"DEBUG: inside _parse_command _zone_data id: {id(self._zone_data)}")
             # if len(self._zone_data) == 0:
             # this is zone 0 with all zone data
             # second byte is zone 1 - 8
@@ -297,9 +297,9 @@ class BaseClient(asyncio.Protocol):
             # fourth byte is zone 9 - 16
             for i in range(8):
                 enabled = data[3] & (1 << i) > 0
-                zone_info = ZoneDetail(i + 1) if i + 1 not in self._zone_data else self._zone_data[i + 1]
+                zone_info = ZoneDetail(i + 9) if i + 9 not in self._zone_data else self._zone_data[i + 9]
                 zone_info.enabled = enabled
-                self._zone_data[i + 9] = ZoneDetail(i + 9, enabled)
+                self._zone_data[i + 9] = zone_info
 
             # third byte is keypad 1 - 8
             # for i in range(8):
