@@ -122,9 +122,7 @@ def convert_volume(kind: HtdDeviceKind, raw_volume: int) -> int:
         (int, int): A tuple where the first number is a percentage, and the second is the raw volume from 0 to 60
     """
     if raw_volume == 0:
-        if kind == HtdDeviceKind.lync:
-            return HtdConstants.MAX_VOLUME
-        return 0
+        return HtdConstants.MAX_VOLUME
 
     htd_volume = raw_volume - HtdConstants.VOLUME_OFFSET
 

@@ -42,14 +42,14 @@ async def async_get_client(
     """
 
     model_info = await async_get_model_info(
-        loop if loop is not None else asyncio.get_event_loop(),
+        loop if loop is not None else asyncio.get_running_loop(),
         network_address=network_address,
         serial_address=serial_address
     )
 
     if model_info["kind"] == HtdDeviceKind.mca:
         client = HtdMcaClient(
-            loop if loop is not None else asyncio.get_event_loop(),
+            loop if loop is not None else asyncio.get_running_loop(),
             model_info,
             network_address=network_address,
             serial_address=serial_address,
@@ -57,7 +57,7 @@ async def async_get_client(
 
     elif model_info["kind"] == HtdDeviceKind.lync:
         client = HtdLyncClient(
-            loop if loop is not None else asyncio.get_event_loop(),
+            loop if loop is not None else asyncio.get_running_loop(),
             model_info,
             network_address=network_address,
             serial_address=serial_address,
@@ -89,7 +89,7 @@ async def async_get_model_info(
     )
 
     model_id = await htd_client.utils.async_send_command(
-        loop if loop is not None else asyncio.get_event_loop(),
+        loop if loop is not None else asyncio.get_running_loop(),
         cmd,
         network_address=network_address,
         serial_address=serial_address

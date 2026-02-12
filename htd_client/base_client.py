@@ -41,6 +41,10 @@ class BaseClient(asyncio.Protocol):
     _socket_lock: asyncio.Lock = None
     _callback_lock: asyncio.Lock = None
 
+    _reconnect_task: asyncio.Task = None
+    _reconnect_delay: float = 1.0
+    _max_reconnect_delay: float = 60.0
+
     _connection: Transport | None = None
     _heartbeat_task: asyncio.Task = None
     _buffer: bytearray | None = None
@@ -118,6 +122,7 @@ class BaseClient(asyncio.Protocol):
         _LOGGER.debug("connected")
         self._connected = True
         self._connection = transport
+        self._reconnect_delay = 1.0
         self._heartbeat_task = asyncio.create_task(self._heartbeat())
 
 
@@ -159,24 +164,29 @@ class BaseClient(asyncio.Protocol):
         self._ready = False
         self._connected = False
         self._buffer = None
-        self._heartbeat_task.cancel()
+        if self._heartbeat_task:
+            self._heartbeat_task.cancel()
 
         if not self._disconnected:
-            asyncio.create_task(self.async_connect())
+            if self._reconnect_task is None or self._reconnect_task.done():
+                self._reconnect_task = asyncio.create_task(self._async_reconnect())
+
+    async def _async_reconnect(self):
+        """Reconnect with exponential backoff."""
+        _LOGGER.info(f"Attempting to reconnect in {self._reconnect_delay} seconds...")
+        await asyncio.sleep(self._reconnect_delay)
+        
+        try:
+            await self.async_connect()
+            # Delay is reset in connection_made upon success
+        except Exception as e:
+            _LOGGER.error(f"Reconnection attempt failed: {e}")
+            self._reconnect_delay = min(self._reconnect_delay * 2, self._max_reconnect_delay)
+            self._reconnect_task = asyncio.create_task(self._async_reconnect())
 
 
     async def async_wait_until_ready(self):
         pass
-    #     start_time = time.time()
-    #     current_time = time.time()
-    #     refresh_count = 0
-    #
-    #     while not self._ready and current_time - start_time < self._socket_timeout_sec:
-    #         current_time = time.time()
-    #
-    #         if refresh_count * self._command_retry_timeout < int(current_time - start_time):
-    #             refresh_count += 1
-    #             self.refresh()
 
     def has_zone_data(self, zone: int):
         return zone in self._zone_data
@@ -450,7 +460,7 @@ class BaseClient(asyncio.Protocol):
                     await self._send_cmd(zone, follow_up[0], follow_up[1])
 
                 last_attempt_time = time.time()
-            await asyncio.sleep(0)
+            await asyncio.sleep(0.1) # Wait for hardware response without hogging CPU
 
 
 
@@ -468,17 +478,6 @@ class BaseClient(asyncio.Protocol):
 
         async with self._socket_lock:
             self._connection.write(cmd)
-
-                # self._connection.flush()
-        # try:
-        # except BrokenPipeError as e:
-        #     _LOGGER.error("Failed to send command, reconnecting and retrying")
-        #     self.async_connect()
-        #
-        #     _LOGGER.debug("Reconnected, retrying command")
-        #     with self._socket_lock:
-        #         self._connection.write(cmd)
-        #         # self._connection.flush()
 
     def get_zone_count(self) -> int:
         """
