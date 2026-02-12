@@ -243,8 +243,11 @@ class HtdMcaClient(BaseClient):
 
         zone_info = self._zone_data[zone]
 
+        if zone_info.volume == 0:
+            return
+
         await self._async_send_and_validate(
-            lambda z: z.volume >= zone_info.volume - 1,
+            lambda z: z.volume <= zone_info.volume - 1,
             zone,
             HtdMcaCommands.COMMON_COMMAND_CODE,
             HtdMcaCommands.VOLUME_DOWN_COMMAND
