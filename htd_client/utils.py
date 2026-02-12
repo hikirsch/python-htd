@@ -1,14 +1,23 @@
-from htd_client.constants import HtdConstants
-from htd_client.models import ZoneDetail
+import asyncio
+import logging
+from typing import Literal, Tuple
 
-def get_command(zone: int, command: bytes, data_code: int) -> bytes:
+from serial_asyncio import open_serial_connection
+
+from .constants import HtdConstants, MAX_BYTES_TO_RECEIVE, HtdDeviceKind
+
+_LOGGER = logging.getLogger(__name__)
+
+
+def build_command(zone: int, command: int, data_code: int, extra_data: bytearray = None) -> bytearray:
     """
     The command sequence we use to send to the device, the header and reserved bytes are always first, the zone is third, followed by the command and code.
 
     Args:
         zone (int): the zone this command is for
-        command (bytes): the command itself
+        command (int): the command itself
         data_code (int): a value associated to the command, can be a source value, or an action to perform for set.
+        extra_data (int, optional): additional data to send with the command, if any. Defaults to None.
 
     Returns:
         bytes: a bytes sequence representing the instruction for the action requested
@@ -18,31 +27,113 @@ def get_command(zone: int, command: bytes, data_code: int) -> bytes:
         HtdConstants.RESERVED_BYTE,
         zone,
         command,
-        data_code,
+        data_code
     ]
+
+    if extra_data is not None:
+        cmd += extra_data
+
     checksum = calculate_checksum(cmd)
     cmd.append(checksum)
 
-    return bytes(cmd)
+    return bytearray(cmd)
 
 
-def convert_volume(raw_volume: int) -> (int, int):
+def stringify_bytes_raw(data: bytes, fmt: Literal["hex", "dec"] = "hex") -> str:
+    if fmt == "hex":
+        prefix = "0x"
+        f = "02x"
+
+    elif fmt == "dec":
+        prefix = ""
+        f = "4d"
+
+    else:
+        raise ValueError("format must be 'hex' or 'dec'")
+
+    return " ".join(f"{prefix}{byte:{f}}" for byte in data)
+
+
+def stringify_bytes(data: bytes) -> str:
+    position = 0
+    chunk_num = 0
+    ret_val = "\n"
+
+    while position < len(data):
+        # each chunk represents a different zone that should be 14 bytes long,
+        chunk = data[position: position + HtdConstants.MESSAGE_CHUNK_SIZE]
+        position += HtdConstants.MESSAGE_CHUNK_SIZE
+        chunk_num += 1
+        line = f'[{chunk_num:2}] ' + stringify_bytes_raw(chunk) + '\n'
+        line += f'[{chunk_num:2}] ' + stringify_bytes_raw(chunk, "dec") + '\n'
+        # line += f'[{chunk_num:2}] ' + decode_response(chunk) + '\n'
+        ret_val += line
+
+    return ret_val
+
+
+async def async_send_command(
+    loop: asyncio.AbstractEventLoop,
+    cmd: bytes,
+    network_address: Tuple[str, int] = None,
+    serial_address: str = None
+) -> bytes | None:
+    if serial_address is not None:
+        reader, writer = await open_serial_connection(
+            loop=loop,
+            url=serial_address,
+            baudrate=38400,
+            timeout=HtdConstants.DEFAULT_COMMAND_RETRY_TIMEOUT
+        )
+
+    elif network_address is not None:
+        host, port = network_address
+        reader, writer = await asyncio.open_connection(host, port)
+
+    else:
+        raise ValueError("unable to connect, no address")
+
+    writer.write(cmd)
+    await writer.drain()
+    data = await reader.read(MAX_BYTES_TO_RECEIVE)
+    writer.close()
+    await writer.wait_closed()
+
+    header_index = data.find(HtdConstants.MESSAGE_HEADER)
+    if header_index == -1:
+        return data
+
+    return data[0:header_index]
+
+
+def convert_value(value: int):
+    return value - 0x100 if value > 0x7F else value
+
+
+def convert_volume(kind: HtdDeviceKind, raw_volume: int) -> int:
     """
     Convert the volume into a usable value. the device will transmit a number between 196 - 255. if it's at max volume, the raw volume will come as 0. this is probably because the gateway only transmits 8 bits per byte. 255 is 0b11111111. since there's no volume = 0 (use mute I guess), if the volume hits 0, it's because it's at max volume, so we make it 256. credit for this goes to lounsbrough
 
     Args:
+        kind (HtdDeviceKind): the kind of device this is for, to determine how we need to convert the volume
         raw_volume (int): the raw volume amount, a number usually ranges from 196 to 255
 
     Returns:
         (int, int): A tuple where the first number is a percentage, and the second is the raw volume from 0 to 60
     """
     if raw_volume == 0:
-        return 100, HtdConstants.MAX_HTD_VOLUME
+        return HtdConstants.MAX_VOLUME
 
     htd_volume = raw_volume - HtdConstants.VOLUME_OFFSET
-    percent_volume = round(htd_volume / HtdConstants.MAX_HTD_VOLUME * 100)
-    fixed = max(0, min(100, percent_volume))
-    return fixed, htd_volume
+
+    return htd_volume
+
+
+def convert_volume_to_raw(volume: int) -> int:
+    if volume == HtdConstants.MAX_VOLUME:
+        return 0
+
+    return HtdConstants.MAX_RAW_VOLUME - (HtdConstants.MAX_VOLUME - volume)
 
 
 def calculate_checksum(message: [int]) -> int:
@@ -55,10 +146,8 @@ def calculate_checksum(message: [int]) -> int:
     Returns:
         int: the sum of the message ints
     """
-    cs = 0
-    for b in message:
-        cs += b
-    return cs
+    return sum(message) & 0xff
+
 
 def is_bit_on(toggles: str, index: int) -> bool:
     """
@@ -72,130 +161,6 @@ def is_bit_on(toggles: str, index: int) -> bool:
         bool: if the bit is on
     """
     return toggles[index] == "1"
-
-
-def validate_source(source: int):
-    """
-    A helper method to validate the source is not outside the range. If it's invalid, an Exception is raised, otherwise nothing will happen.
-
-    Args:
-        source (int): the source number to validate
-
-    Raises:
-        Exception: source X is invalid
-    """
-    if source not in range(1, HtdConstants.MAX_HTD_SOURCES + 1):
-        raise Exception("source %s is invalid" % source)
-
-
-def validate_zone(zone: int):
-    """
-    A helper method to validate the zone is not outside the range. If it's invalid, an Exception is raised, otherwise nothing will happen.
-
-    Args:
-        zone (int): the zone to validate
-
-    Raises:
-        Exception - zone X is invalid
-    """
-    if zone not in range(1, HtdConstants.MAX_HTD_ZONES + 1):
-        raise Exception("zone %s is invalid" % zone)
-
-
-# credit for this new parser goes to lounsbrough
-def parse_zone(zone_data: bytes) -> ZoneDetail | None:
-    """
-    This will take a single message chunk of 14 bytes and parse this into a usable `ZoneDetail` model to read the state.
-
-    Parameters:
-        zone_data (bytes): an array of bytes representing a zone
-
-    Returns:
-        ZoneDetail - a parsed instance of zone_data normalized or None if invalid
-    """
-    if (
-        zone_data[HtdConstants.HEADER_BYTE_ZONE_DATA_INDEX] != HtdConstants.HEADER_BYTE or
-        zone_data[HtdConstants.RESERVED_BYTE_ZONE_DATA_INDEX] != HtdConstants.RESERVED_BYTE
-    ):
-        return None
-
-    # I think this is some kind of verification, it has been right so far.
-    if zone_data[HtdConstants.VERIFICATION_BYTE_ZONE_DATA_INDEX] != HtdConstants.VERIFICATION_BYTE:
-        return None
-
-    # the 4th position represent the toggles for power, mute, mode and party,
-    state_toggles = to_binary_string(
-        zone_data[HtdConstants.STATE_TOGGLES_ZONE_DATA_INDEX]
-    )
-
-    volume, htd_volume = convert_volume(
-        zone_data[HtdConstants.VOLUME_ZONE_DATA_INDEX]
-    )
-
-    zone_number = zone_data[HtdConstants.ZONE_NUMBER_ZONE_DATA_INDEX]
-
-    zone = ZoneDetail(zone_number)
-
-    zone.number = zone_number
-    zone.power = is_bit_on(
-        state_toggles,
-        HtdConstants.POWER_STATE_TOGGLE_INDEX
-    )
-    zone.mute = is_bit_on(state_toggles, HtdConstants.MUTE_STATE_TOGGLE_INDEX)
-    zone.mode = is_bit_on(state_toggles, HtdConstants.MODE_STATE_TOGGLE_INDEX)
-    zone.party = is_bit_on(
-        state_toggles,
-        HtdConstants.PARTY_MODE_STATE_TOGGLE_INDEX
-    )
-
-    zone.source = zone_data[HtdConstants.SOURCE_ZONE_DATA_INDEX] + HtdConstants.SOURCE_QUERY_OFFSET
-    zone.volume = volume
-    zone.htd_volume = htd_volume
-    zone.treble = zone_data[HtdConstants.TREBLE_ZONE_DATA_INDEX]
-    zone.bass = zone_data[HtdConstants.BASS_ZONE_DATA_INDEX]
-    zone.balance = zone_data[HtdConstants.BALANCE_ZONE_DATA_INDEX]
-
-    return zone
-
-
-def parse_single_zone(data: bytes, zone: int) -> ZoneDetail | None:
-    all_zones = parse_all_zones(data)
-
-    if zone in all_zones:
-        return all_zones[zone]
-
-    return None
-
-
-def parse_all_zones(data: bytes) -> dict[int, ZoneDetail]:
-    """
-    The handler method to take the entire response from the controller and parses each zone.
-
-    Args:
-        data (bytes): the full response from the device, represents all the zones to be parsed
-
-    Returns:
-        dict[int, ZoneDetail]: a dict where the key represents the zone number, and the value are the details of the zone
-    """
-    position = 0
-    zones = {}
-
-    while position < len(data):
-        # each chunk represents a different zone that should be 14 bytes long,
-        zone_data = data[position: position + HtdConstants.MESSAGE_CHUNK_SIZE]
-        position += HtdConstants.MESSAGE_CHUNK_SIZE
-
-        # if the zone data we got is less than the exp
-        if len(zone_data) < HtdConstants.MESSAGE_CHUNK_SIZE:
-            break
-
-        zone_info = parse_zone(zone_data)
-
-        # if a valid zone was found, we're done
-        if zone_info is not None:
-            zones[zone_info.number] = zone_info
-
-    return zones
 
 
 def to_binary_string(raw_value: int) -> str:
@@ -217,24 +182,21 @@ def to_binary_string(raw_value: int) -> str:
     # so substring starting at 2
     state_toggles = state_toggles[2:]
 
-    # each of the 4 bits as 1 represent that the toggle is set to on,
-    # if it's less than 4 digits, we fill with zeros
-    state_toggles = state_toggles.zfill(4)
+    # each of the 8 bits as 1 represent that the toggle is set to on,
+    # if it's less than 8 digits, we fill with zeros
+    state_toggles = state_toggles.zfill(8)
 
     return state_toggles
 
-def get_friendly_name(model: str):
-    """
-    This will return a friendlier name for the model gateway based on the name from the device.
 
-    Args:
-        model (str):
+def parse_zone_name(data: bytes):
+    start = HtdConstants.NAME_START_INDEX
+    end = start + HtdConstants.ZONE_NAME_MAX_LENGTH
+    zone_name = data[start:end]
+    stripped = zone_name.strip(b"\x00")
+    decoded = decode_response(stripped)
+    return decoded
 
-    Returns:
-        str: a friendlier name of the model
-    """
-    match model:
-        case HtdConstants.MCA66_MODEL_NAME:
-            return HtdConstants.MCA66_FRIENDLY_MODEL_NAME
-        case _:
-            return f"Unknown ({model})"
+
+def decode_response(response: bytes):
+    return response.decode(errors="replace")
