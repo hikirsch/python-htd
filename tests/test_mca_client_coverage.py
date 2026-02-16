@@ -149,25 +149,25 @@ async def test_audio_limits_mca(mca_client):
     mca_client._async_send_and_validate = AsyncMock()
     
     # Bass Down limit
-    mca_client._zone_data[1].bass = HtdConstants.MIN_BASS
+    mca_client._zone_data[1].bass = HtdConstants.MCA_MIN_BASS
     await mca_client.async_bass_down(1)
     mca_client._async_send_and_validate.assert_not_called()
     
     # Treble limits
-    mca_client._zone_data[1].treble = HtdConstants.MAX_TREBLE
+    mca_client._zone_data[1].treble = HtdConstants.MCA_MAX_TREBLE
     await mca_client.async_treble_up(1)
     mca_client._async_send_and_validate.assert_not_called()
     
-    mca_client._zone_data[1].treble = HtdConstants.MIN_TREBLE
+    mca_client._zone_data[1].treble = HtdConstants.MCA_MIN_TREBLE
     await mca_client.async_treble_down(1)
     mca_client._async_send_and_validate.assert_not_called()
 
     # Balance limits
-    mca_client._zone_data[1].balance = HtdConstants.MAX_BALANCE
+    mca_client._zone_data[1].balance = HtdConstants.MCA_MAX_BALANCE
     await mca_client.async_balance_right(1)
     mca_client._async_send_and_validate.assert_not_called()
     
-    mca_client._zone_data[1].balance = HtdConstants.MIN_BALANCE
+    mca_client._zone_data[1].balance = HtdConstants.MCA_MIN_BALANCE
     await mca_client.async_balance_left(1)
     mca_client._async_send_and_validate.assert_not_called()
 
@@ -183,29 +183,21 @@ async def test_set_source(mca_client):
 
 @pytest.mark.asyncio
 async def test_volume_limits_mca(mca_client):
-     mca_client._async_send_and_validate = AsyncMock()
+    mca_client._async_send_and_validate = AsyncMock()
      
-     # Max volume
-     mca_client._zone_data[1].volume = HtdConstants.MAX_VOLUME
-     await mca_client.async_volume_up(1)
-     mca_client._async_send_and_validate.assert_not_called()
+    # Max volume
+    mca_client._zone_data[1].volume = HtdConstants.MAX_VOLUME
+    await mca_client.async_volume_up(1)
+    mca_client._async_send_and_validate.assert_not_called()
      
-     # Min volume? mca_client has no check for min volume in async_volume_down?
-     # Let's check code. Code:
-     # await self._async_send_and_validate(lambda z: z.volume >= zone_info.volume - 1, ...)
-     # It assumes hardware limit or validate failure?
-     # But async_volume_up HAS check: code line 226: if zone_info.volume == HtdConstants.MAX_VOLUME: return.
+    # Treble/Bass limits?
+    mca_client._zone_data[1].treble = HtdConstants.MCA_MAX_TREBLE
+    await mca_client.async_treble_up(1)
+    mca_client._async_send_and_validate.assert_not_called()
      
-     # async_volume_down has NO check in code provided in Step 492.
-     
-     # Treble/Bass limits?
-     mca_client._zone_data[1].treble = HtdConstants.MAX_TREBLE
-     await mca_client.async_treble_up(1)
-     mca_client._async_send_and_validate.assert_not_called()
-     
-     mca_client._zone_data[1].treble = HtdConstants.MIN_TREBLE
-     await mca_client.async_treble_down(1)
-     mca_client._async_send_and_validate.assert_not_called()
+    mca_client._zone_data[1].treble = HtdConstants.MCA_MIN_TREBLE
+    await mca_client.async_treble_down(1)
+    mca_client._async_send_and_validate.assert_not_called()
 
 
 def test_on_zone_update(mca_client):

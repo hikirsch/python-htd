@@ -237,7 +237,7 @@ class HtdLyncClient(BaseClient):
         current_zone = self.get_zone(zone)
 
         new_bass = current_zone.bass + 1
-        if new_bass >= HtdConstants.MAX_BASS:
+        if new_bass > HtdConstants.LYNC_MAX_BASS:
             return
 
         await self.async_set_bass(zone, new_bass)
@@ -253,10 +253,11 @@ class HtdLyncClient(BaseClient):
         current_zone = self.get_zone(zone)
 
         new_bass = current_zone.bass - 1
-        if new_bass < HtdConstants.MIN_BASS:
+        if new_bass < HtdConstants.LYNC_MIN_BASS:
             return
 
         await self.async_set_bass(zone, new_bass)
+
 
     async def async_set_bass(self, zone: int, bass: int):
         """
@@ -266,17 +267,27 @@ class HtdLyncClient(BaseClient):
             zone (int): the zone
             bass (int): the bass value to set
         """
+
+        logging.debug(f"Setting bass for zone {zone} to {bass}")
+
         zone_info = self.get_zone(zone)
 
         if zone_info.bass == bass:
             return
 
-        return await self._async_send_and_validate(
+        encoded_bass = bass & 0xFF
+
+        await self._send_cmd(
+            zone,
+            HtdLyncCommands.BASS_SETTING_CONTROL_COMMAND_CODE,
+            encoded_bass
+        )
+
+        await self._async_send_and_validate(
             lambda z: z.bass == bass,
             zone,
             HtdLyncCommands.COMMON_COMMAND_CODE,
-            HtdLyncCommands.BASS_SETTING_CONTROL_COMMAND_CODE,
-            bytearray([bass])
+            HtdLyncConstants.STATUS_REFRESH_CODE
         )
 
     async def async_treble_up(self, zone: int):
@@ -290,7 +301,7 @@ class HtdLyncClient(BaseClient):
         current_zone = self.get_zone(zone)
 
         new_treble = current_zone.treble + 1
-        if new_treble >= HtdConstants.MAX_TREBLE:
+        if new_treble > HtdConstants.LYNC_MAX_TREBLE:
             return
 
         await self.async_set_treble(zone, new_treble)
@@ -306,7 +317,7 @@ class HtdLyncClient(BaseClient):
         current_zone = self.get_zone(zone)
 
         new_treble = current_zone.treble - 1
-        if new_treble < HtdConstants.MIN_TREBLE:
+        if new_treble < HtdConstants.LYNC_MIN_TREBLE:
             return
 
         await self.async_set_treble(zone, new_treble)
@@ -325,12 +336,19 @@ class HtdLyncClient(BaseClient):
         if treble == zone_info.treble:
             return
 
-        return await self._async_send_and_validate(
+        encoded_treble = treble & 0xFF
+
+        await self._send_cmd(
+            zone,
+            HtdLyncCommands.TREBLE_SETTING_CONTROL_COMMAND_CODE,
+            encoded_treble
+        )
+
+        await self._async_send_and_validate(
             lambda z: z.treble == treble,
             zone,
             HtdLyncCommands.COMMON_COMMAND_CODE,
-            HtdLyncCommands.TREBLE_SETTING_CONTROL_COMMAND_CODE,
-            bytearray([treble])
+            HtdLyncConstants.STATUS_REFRESH_CODE
         )
 
     async def async_balance_left(self, zone: int):
@@ -344,7 +362,7 @@ class HtdLyncClient(BaseClient):
         current_zone = self.get_zone(zone)
 
         new_balance = current_zone.balance - 1
-        if new_balance < HtdConstants.MIN_BALANCE:
+        if new_balance < HtdConstants.LYNC_MIN_BALANCE:
             return
 
         await self.async_set_balance(zone, new_balance)
@@ -360,7 +378,7 @@ class HtdLyncClient(BaseClient):
         current_zone = self.get_zone(zone)
 
         new_balance = current_zone.balance + 1
-        if new_balance > HtdConstants.MAX_BALANCE:
+        if new_balance > HtdConstants.LYNC_MAX_BALANCE:
             return
 
         await self.async_set_balance(zone, new_balance)
@@ -379,11 +397,19 @@ class HtdLyncClient(BaseClient):
         if balance == current_zone.balance:
             return
 
-        return await self._async_send_and_validate(
-            lambda z: z.balance == balance,
+        encoded_balance = balance & 0xFF
+
+        await self._send_cmd(
             zone,
             HtdLyncCommands.BALANCE_SETTING_CONTROL_COMMAND_CODE,
-            balance
+            encoded_balance
+        )
+
+        await self._async_send_and_validate(
+            lambda z: z.balance == balance,
+            zone,
+            HtdLyncCommands.COMMON_COMMAND_CODE,
+            HtdLyncConstants.STATUS_REFRESH_CODE
         )
 
     # def query_zone_name(self, zone: int) -> str:

@@ -28,6 +28,7 @@ async def async_get_client(
     serial_address: str = None,
     network_address: Tuple[str, int] = None,
     loop: asyncio.AbstractEventLoop = None,
+    retry_attempts: int = HtdConstants.DEFAULT_RETRY_ATTEMPTS,
 ) -> BaseClient:
     """
     Create a new client object.
@@ -36,6 +37,7 @@ async def async_get_client(
         network_address (str): The address to communicate with over TCP.
         serial_address (str): The location of the serial port.
         loop (asyncio.AbstractEventLoop): The event loop to use.
+        retry_attempts (int): Number of times to retry a command before failing.
 
     Returns:
         HtdClient: The new client object.
@@ -53,6 +55,7 @@ async def async_get_client(
             model_info,
             network_address=network_address,
             serial_address=serial_address,
+            retry_attempts=retry_attempts,
         )
 
     elif model_info["kind"] == HtdDeviceKind.lync:
@@ -61,10 +64,11 @@ async def async_get_client(
             model_info,
             network_address=network_address,
             serial_address=serial_address,
+            retry_attempts=retry_attempts,
         )
 
     else:
-        raise ValueError(f"Unknown Device Kind: {model_info["kind"]}")
+        raise ValueError(f"Unknown Device Kind: {model_info['kind']}")
 
     await client.async_connect()
 

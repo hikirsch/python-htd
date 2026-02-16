@@ -82,14 +82,26 @@ class HtdConstants:
 
     VOLUME_OFFSET = MAX_RAW_VOLUME - MAX_VOLUME
 
-    MIN_BASS = -10
-    MAX_BASS = 10
+    # Lync Constants
+    LYNC_MIN_BASS = -10
+    LYNC_MAX_BASS = 10
+    LYNC_MIN_TREBLE = -10
+    LYNC_MAX_TREBLE = 10
+    LYNC_MIN_BALANCE = -18
+    LYNC_MAX_BALANCE = 18
 
-    MIN_TREBLE = -10
-    MAX_TREBLE = 10
+    # MCA Constants
+    # Raw values exposed to the user (-12 to 12)
+    MCA_MIN_BASS = -12
+    MCA_MAX_BASS = 12
+    MCA_MIN_TREBLE = -12
+    MCA_MAX_TREBLE = 12
+    MCA_MIN_BALANCE = -12
+    MCA_MAX_BALANCE = 12
 
-    MIN_BALANCE = -18
-    MAX_BALANCE = 18
+    # Step size exposed to user
+    MCA_BASS_TREBLE_STEP = 4
+    MCA_BALANCE_STEP = 6
 
     # each message we get is chunked at 14 bytes
     MESSAGE_CHUNK_SIZE = 14
@@ -214,6 +226,9 @@ class HtdLyncConstants:
 
     BASS_COMMAND_OFFSET = 0x80
     TREBLE_COMMAND_OFFSET = 0x80
+    
+    STATUS_REFRESH_CODE = 0x1F
+
 
 
 class HtdMcaCommands:
