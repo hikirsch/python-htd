@@ -24,11 +24,14 @@ _LOGGER = logging.getLogger(__name__)
 
 class HtdMcaClient(BaseClient):
     _target_volumes: Dict[int, int | None] = None
+    _target_bass: Dict[int, int | None] = None
+    _target_treble: Dict[int, int | None] = None
+    _target_balance: Dict[int, int | None] = None
     _subscribed: bool = None
 
     def __init__(
         self,
-        loop: asyncio.EventLoop,
+        loop: asyncio.AbstractEventLoop,
         model_info: HtdModelInfo,
         network_address: Tuple[str, int] = None,
         serial_address: str = None,
@@ -65,6 +68,9 @@ class HtdMcaClient(BaseClient):
         # we'll re-run _set_volume to get to the target
         self._subscribed = False
         self._target_volumes = {key: None for key in range(1, self._model_info["sources"] + 1)}
+        self._target_bass = {key: None for key in range(1, self._model_info["sources"] + 1)}
+        self._target_treble = {key: None for key in range(1, self._model_info["sources"] + 1)}
+        self._target_balance = {key: None for key in range(1, self._model_info["sources"] + 1)}
 
 
     async def async_connect(self):
@@ -85,6 +91,24 @@ class HtdMcaClient(BaseClient):
             else:
                 asyncio.run_coroutine_threadsafe(self._async_set_volume(zone), self._loop)
 
+        if self._target_bass[zone] is not None:
+            if self._zone_data[zone].bass == self._target_bass[zone]:
+                self._target_bass[zone] = None
+            else:
+                asyncio.run_coroutine_threadsafe(self._async_set_bass(zone), self._loop)
+
+        if self._target_treble[zone] is not None:
+            if self._zone_data[zone].treble == self._target_treble[zone]:
+                self._target_treble[zone] = None
+            else:
+                asyncio.run_coroutine_threadsafe(self._async_set_treble(zone), self._loop)
+
+        if self._target_balance[zone] is not None:
+            if self._zone_data[zone].balance == self._target_balance[zone]:
+                self._target_balance[zone] = None
+            else:
+                asyncio.run_coroutine_threadsafe(self._async_set_balance(zone), self._loop)
+
     async def async_mute(self, zone: int):
         if self._zone_data[zone].mute:
             return
@@ -99,6 +123,15 @@ class HtdMcaClient(BaseClient):
 
     def has_volume_target(self, zone: int):
         return self._target_volumes[zone] is not None
+
+    def has_bass_target(self, zone: int):
+        return self._target_bass[zone] is not None
+
+    def has_treble_target(self, zone: int):
+        return self._target_treble[zone] is not None
+
+    def has_balance_target(self, zone: int):
+        return self._target_balance[zone] is not None
 
     async def async_set_volume(self, zone: int, volume: int):
         existing = False
@@ -311,15 +344,77 @@ class HtdMcaClient(BaseClient):
 
         zone_info = self._zone_data[zone]
 
-        new_bass = zone_info.bass + 1
-        if new_bass > HtdConstants.MAX_BASS:
+        if not zone_info.power:
+            await self.async_power_on(zone)
+
+        new_bass = zone_info.bass + HtdConstants.MCA_BASS_TREBLE_STEP
+        if new_bass > HtdConstants.MCA_MAX_BASS:
             return
 
         await self._async_send_and_validate(
-            lambda z: z.bass >= zone_info.bass + 1,
+            lambda z: z.bass >= zone_info.bass + HtdConstants.MCA_BASS_TREBLE_STEP,
             zone,
             HtdMcaCommands.COMMON_COMMAND_CODE,
             HtdMcaCommands.BASS_UP_COMMAND
+        )
+
+    async def async_set_bass(self, zone: int, bass: int):
+        # Clip to limits
+        if bass > HtdConstants.MCA_MAX_BASS:
+            bass = HtdConstants.MCA_MAX_BASS
+        elif bass < HtdConstants.MCA_MIN_BASS:
+            bass = HtdConstants.MCA_MIN_BASS
+            
+        # Round to nearest step
+        if bass % HtdConstants.MCA_BASS_TREBLE_STEP != 0 and bass != 0:
+             bass = HtdConstants.MCA_BASS_TREBLE_STEP * round(bass / HtdConstants.MCA_BASS_TREBLE_STEP)
+        
+        existing = False
+
+        if self._target_bass[zone] is not None:
+            existing = True
+
+        self._target_bass[zone] = bass
+
+        if existing:
+            return
+
+        zone_info = self._zone_data[zone]
+
+        if not zone_info.power:
+            await self.async_power_on(zone)
+
+        return await self._async_set_bass(zone)
+
+    async def _async_set_bass(self, zone: int):
+        """
+        Resume setting the bass of a zone.
+
+        Args:
+            zone (int): the zone
+        """
+
+        zone_info = self._zone_data[zone]
+
+        if not zone_info.power:
+            self._target_bass[zone] = None
+            return
+
+        diff = self._target_bass[zone] - zone_info.bass
+
+        if diff == 0:
+            return
+
+        if diff < 0:
+            bass_command = HtdMcaCommands.BASS_DOWN_COMMAND
+        else:
+            bass_command = HtdMcaCommands.BASS_UP_COMMAND
+
+        await self._async_send_and_validate(
+            lambda z: z.bass != zone_info.bass,
+            zone,
+            HtdMcaCommands.COMMON_COMMAND_CODE,
+            bass_command
         )
 
     async def async_bass_down(self, zone: int):
@@ -332,12 +427,15 @@ class HtdMcaClient(BaseClient):
 
         zone_info = self._zone_data[zone]
 
-        new_bass = zone_info.bass - 1
-        if new_bass < HtdConstants.MIN_BASS:
+        if not zone_info.power:
+            await self.async_power_on(zone)
+
+        new_bass = zone_info.bass - HtdConstants.MCA_BASS_TREBLE_STEP
+        if new_bass < HtdConstants.MCA_MIN_BASS:
             return
 
         await self._async_send_and_validate(
-            lambda z: z.bass <= zone_info.bass - 1,
+            lambda z: z.bass <= zone_info.bass - HtdConstants.MCA_BASS_TREBLE_STEP,
             zone,
             HtdMcaCommands.COMMON_COMMAND_CODE,
             HtdMcaCommands.BASS_DOWN_COMMAND
@@ -353,12 +451,15 @@ class HtdMcaClient(BaseClient):
 
         zone_info = self._zone_data[zone]
 
-        new_treble = zone_info.treble + 1
-        if new_treble > HtdConstants.MAX_TREBLE:
+        if not zone_info.power:
+            await self.async_power_on(zone)
+
+        new_treble = zone_info.treble + HtdConstants.MCA_BASS_TREBLE_STEP
+        if new_treble > HtdConstants.MCA_MAX_TREBLE:
             return
 
         await self._async_send_and_validate(
-            lambda z: z.treble >= zone_info.treble + 1,
+            lambda z: z.treble >= zone_info.treble + HtdConstants.MCA_BASS_TREBLE_STEP,
             zone,
             HtdMcaCommands.COMMON_COMMAND_CODE,
             HtdMcaCommands.TREBLE_UP_COMMAND
@@ -374,15 +475,77 @@ class HtdMcaClient(BaseClient):
 
         zone_info = self._zone_data[zone]
 
-        new_treble = zone_info.treble - 1
-        if new_treble < HtdConstants.MIN_TREBLE:
+        if not zone_info.power:
+            await self.async_power_on(zone)
+
+        new_treble = zone_info.treble - HtdConstants.MCA_BASS_TREBLE_STEP
+        if new_treble < HtdConstants.MCA_MIN_TREBLE:
             return
 
         await self._async_send_and_validate(
-            lambda z: z.treble <= zone_info.treble - 1,
+            lambda z: z.treble <= zone_info.treble - HtdConstants.MCA_BASS_TREBLE_STEP,
             zone,
             HtdMcaCommands.COMMON_COMMAND_CODE,
             HtdMcaCommands.TREBLE_DOWN_COMMAND
+        )
+
+    async def async_set_treble(self, zone: int, treble: int):
+        # Clip to limits
+        if treble > HtdConstants.MCA_MAX_TREBLE:
+            treble = HtdConstants.MCA_MAX_TREBLE
+        elif treble < HtdConstants.MCA_MIN_TREBLE:
+            treble = HtdConstants.MCA_MIN_TREBLE
+
+        # Round to nearest step
+        if treble % HtdConstants.MCA_BASS_TREBLE_STEP != 0 and treble != 0:
+             treble = HtdConstants.MCA_BASS_TREBLE_STEP * round(treble / HtdConstants.MCA_BASS_TREBLE_STEP)
+             
+        existing = False
+
+        if self._target_treble[zone] is not None:
+            existing = True
+
+        self._target_treble[zone] = treble
+
+        if existing:
+            return
+
+        zone_info = self._zone_data[zone]
+
+        if not zone_info.power:
+            await self.async_power_on(zone)
+
+        return await self._async_set_treble(zone)
+
+    async def _async_set_treble(self, zone: int):
+        """
+        Resume setting the treble of a zone.
+
+        Args:
+            zone (int): the zone
+        """
+
+        zone_info = self._zone_data[zone]
+
+        if not zone_info.power:
+            self._target_treble[zone] = None
+            return
+
+        diff = self._target_treble[zone] - zone_info.treble
+
+        if diff == 0:
+            return
+
+        if diff < 0:
+            treble_command = HtdMcaCommands.TREBLE_DOWN_COMMAND
+        else:
+            treble_command = HtdMcaCommands.TREBLE_UP_COMMAND
+
+        await self._async_send_and_validate(
+            lambda z: z.treble != zone_info.treble,
+            zone,
+            HtdMcaCommands.COMMON_COMMAND_CODE,
+            treble_command
         )
 
     async def async_balance_left(self, zone: int):
@@ -395,12 +558,15 @@ class HtdMcaClient(BaseClient):
 
         zone_info = self._zone_data[zone]
 
-        new_balance = zone_info.balance - 1
-        if new_balance < HtdConstants.MIN_BALANCE:
+        if not zone_info.power:
+            await self.async_power_on(zone)
+
+        new_balance = zone_info.balance - HtdConstants.MCA_BALANCE_STEP
+        if new_balance < HtdConstants.MCA_MIN_BALANCE:
             return
 
         await self._async_send_and_validate(
-            lambda z: z.balance <= zone_info.balance - 1,
+            lambda z: z.balance <= zone_info.balance - HtdConstants.MCA_BALANCE_STEP,
             zone,
             HtdMcaCommands.COMMON_COMMAND_CODE,
             HtdMcaCommands.BALANCE_LEFT_COMMAND
@@ -416,15 +582,77 @@ class HtdMcaClient(BaseClient):
 
         zone_info = self._zone_data[zone]
 
-        new_balance = zone_info.balance + 1
-        if new_balance > HtdConstants.MAX_BALANCE:
+        if not zone_info.power:
+            await self.async_power_on(zone)
+
+        new_balance = zone_info.balance + HtdConstants.MCA_BALANCE_STEP
+        if new_balance > HtdConstants.MCA_MAX_BALANCE:
             return
 
         await self._async_send_and_validate(
-            lambda z: z.balance >= zone_info.balance + 1,
+            lambda z: z.balance >= zone_info.balance + HtdConstants.MCA_BALANCE_STEP,
             zone,
             HtdMcaCommands.COMMON_COMMAND_CODE,
             HtdMcaCommands.BALANCE_RIGHT_COMMAND
+        )
+
+    async def async_set_balance(self, zone: int, balance: int):
+        # Clip to limits
+        if balance > HtdConstants.MCA_MAX_BALANCE:
+            balance = HtdConstants.MCA_MAX_BALANCE
+        elif balance < HtdConstants.MCA_MIN_BALANCE:
+            balance = HtdConstants.MCA_MIN_BALANCE
+
+        # Round to nearest step
+        if balance % HtdConstants.MCA_BALANCE_STEP != 0 and balance != 0:
+             balance = HtdConstants.MCA_BALANCE_STEP * round(balance / HtdConstants.MCA_BALANCE_STEP)
+
+        existing = False
+
+        if self._target_balance[zone] is not None:
+            existing = True
+
+        self._target_balance[zone] = balance
+
+        if existing:
+            return
+
+        zone_info = self._zone_data[zone]
+
+        if not zone_info.power:
+            await self.async_power_on(zone)
+
+        return await self._async_set_balance(zone)
+
+    async def _async_set_balance(self, zone: int):
+        """
+        Resume setting the balance of a zone.
+
+        Args:
+            zone (int): the zone
+        """
+
+        zone_info = self._zone_data[zone]
+
+        if not zone_info.power:
+            self._target_balance[zone] = None
+            return
+
+        diff = self._target_balance[zone] - zone_info.balance
+
+        if diff == 0:
+            return
+
+        if diff < 0:
+            balance_command = HtdMcaCommands.BALANCE_LEFT_COMMAND
+        else:
+            balance_command = HtdMcaCommands.BALANCE_RIGHT_COMMAND
+
+        await self._async_send_and_validate(
+            lambda z: z.balance != zone_info.balance,
+            zone,
+            HtdMcaCommands.COMMON_COMMAND_CODE,
+            balance_command
         )
 
     # def get_source_names(self):

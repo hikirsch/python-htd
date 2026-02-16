@@ -88,17 +88,17 @@ async def test_bass_treble_balance_limits(lync_client):
     lync_client.async_set_balance = AsyncMock()
     
     # Bass limit
-    lync_client._zone_data[1].bass = HtdConstants.MAX_BASS
+    lync_client._zone_data[1].bass = HtdConstants.LYNC_MAX_BASS
     await lync_client.async_bass_up(1)
     lync_client.async_set_bass.assert_not_called()
     
     # Treble limit
-    lync_client._zone_data[1].treble = HtdConstants.MAX_TREBLE
+    lync_client._zone_data[1].treble = HtdConstants.LYNC_MAX_TREBLE
     await lync_client.async_treble_up(1)
     lync_client.async_set_treble.assert_not_called()
     
     # Balance limit
-    lync_client._zone_data[1].balance = HtdConstants.MAX_BALANCE
+    lync_client._zone_data[1].balance = HtdConstants.LYNC_MAX_BALANCE
     await lync_client.async_balance_right(1)
     lync_client.async_set_balance.assert_not_called()
 
@@ -180,31 +180,42 @@ async def test_audio_controls_success(lync_client):
 
 @pytest.mark.asyncio
 async def test_set_audio_values(lync_client):
+    lync_client._send_cmd = AsyncMock() 
     lync_client._async_send_and_validate = AsyncMock()
-    lync_client._zone_data[1].bass = 0 # != 5
-    lync_client._zone_data[1].treble = 0
-    lync_client._zone_data[1].balance = 0
     
     # Set bass
     await lync_client.async_set_bass(1, 5)
-    args = lync_client._async_send_and_validate.call_args[0]
-    # args: validate, zone, cmd, code, extra
-    assert args[2] == HtdLyncCommands.COMMON_COMMAND_CODE
-    assert args[3] == HtdLyncCommands.BASS_SETTING_CONTROL_COMMAND_CODE
-    assert args[4] == bytearray([5])
+    
+    # Check 0x18 sent
+    args_send = lync_client._send_cmd.call_args[0]
+    assert args_send[1] == HtdLyncCommands.BASS_SETTING_CONTROL_COMMAND_CODE
+    assert args_send[2] == 5
+    
+    # Check Commit
+    args_val = lync_client._async_send_and_validate.call_args[0]
+    assert args_val[2] == HtdLyncCommands.COMMON_COMMAND_CODE
+    assert args_val[3] == HtdLyncConstants.STATUS_REFRESH_CODE
     
     # Set treble
     await lync_client.async_set_treble(1, 5)
-    args = lync_client._async_send_and_validate.call_args[0]
-    assert args[3] == HtdLyncCommands.TREBLE_SETTING_CONTROL_COMMAND_CODE
-    assert args[4] == bytearray([5])
+    args_send = lync_client._send_cmd.call_args[0]
+    assert args_send[1] == HtdLyncCommands.TREBLE_SETTING_CONTROL_COMMAND_CODE
+    assert args_send[2] == 5
+    
+    args_val = lync_client._async_send_and_validate.call_args[0]
+    assert args_val[2] == HtdLyncCommands.COMMON_COMMAND_CODE
+    assert args_val[3] == HtdLyncConstants.STATUS_REFRESH_CODE
     
     # Set balance
     await lync_client.async_set_balance(1, 5)
-    # Lync balance: send_and_validate(..., zone, BALANCE_SETTING_CONTROL, balance)
-    args = lync_client._async_send_and_validate.call_args[0]
-    assert args[2] == HtdLyncCommands.BALANCE_SETTING_CONTROL_COMMAND_CODE
-    assert args[3] == 5
+    
+    args_send = lync_client._send_cmd.call_args[0]
+    assert args_send[1] == HtdLyncCommands.BALANCE_SETTING_CONTROL_COMMAND_CODE
+    assert args_send[2] == 5
+    
+    args_val = lync_client._async_send_and_validate.call_args[0]
+    assert args_val[2] == HtdLyncCommands.COMMON_COMMAND_CODE
+    assert args_val[3] == HtdLyncConstants.STATUS_REFRESH_CODE
 
 @pytest.mark.asyncio
 async def test_set_source_high(lync_client):

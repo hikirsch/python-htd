@@ -186,7 +186,11 @@ class BaseClient(asyncio.Protocol):
 
 
     async def async_wait_until_ready(self):
-        pass
+        start_time = time.time()
+        while not self._ready:
+            if time.time() - start_time > self._socket_timeout_sec:
+                raise Exception("Timed out waiting for device to be ready")
+            await asyncio.sleep(0.1)
 
     def has_zone_data(self, zone: int):
         return zone in self._zone_data
@@ -284,7 +288,6 @@ class BaseClient(asyncio.Protocol):
 
     def _parse_command(self, zone, cmd, data):
         if cmd == HtdCommonCommands.KEYPAD_EXISTS_RECEIVE_COMMAND:
-            print(f"DEBUG: inside _parse_command _zone_data id: {id(self._zone_data)}")
             # if len(self._zone_data) == 0:
             # this is zone 0 with all zone data
             # second byte is zone 1 - 8
@@ -569,6 +572,10 @@ class BaseClient(asyncio.Protocol):
     @abstractmethod
     async def async_power_off(self, zone: int):
         pass
+    
+    @abstractmethod
+    async def async_set_bass(self, zone: int, bass: int):
+        pass
 
     @abstractmethod
     async def async_bass_up(self, zone: int):
@@ -576,6 +583,10 @@ class BaseClient(asyncio.Protocol):
 
     @abstractmethod
     async def async_bass_down(self, zone: int):
+        pass
+
+    @abstractmethod
+    async def async_set_treble(self, zone: int, treble: int):
         pass
 
     @abstractmethod
